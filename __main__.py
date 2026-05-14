@@ -1,0 +1,2 @@
+from HycMarmoset import mamosetTextrues
+print(mamosetTextrues.SEMANTIC_KEYS)
