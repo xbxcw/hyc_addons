@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Blender: Start",
+            "type": "shell",
+            "command": "${command:blender.start}"
+        },
+        {
+            "label": "Blender: Run Script",
+            "type": "shell",
+            "command": "${command:blender.runScript}"
+        },
+        {
+            "label": "Unreal: UE execute",
+            "type": "shell",
+            "command": "${command:ue-python.execute}"
+        }
+    ]
+}

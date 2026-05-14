@@ -1,0 +1,40 @@
+{
+	"folders": [
+		{
+			"name": "hyc_blender_python",
+			"path": ".."
+		},
+		{
+			"path": "../../hyc_ue_python"
+		},
+		{
+			"path": "../../hyc_marmosetToolbag_python"
+		}
+	],
+	"settings": {
+		"files.autoSave": "afterDelay",
+		"python.analysis.autoFormatStrings": true,
+		"python.analysis.typeCheckingMode": "basic",
+		"VsCodeTaskButtons.tasks": [
+			// 可选但推荐：为运行脚本创建先启动Blender的按钮
+			{
+				"label": "🎬 Blender: Start",  // 按钮显示文本
+				"task": "Blender: Start",  // 对应 tasks.json 中的 label
+				"tooltip": "启动 Blender 实例"  // 鼠标悬停提示
+			},
+			{
+				"label": "🚀 Run Script",
+				"task": "Blender: Run Script",  // 对应 tasks.json 中的 label
+				"tooltip": "在当前激活的 Blender 实例中运行脚本"
+			},
+			{
+				"label": "🚀 UE Execute",
+				"task": "Unreal: UE execute",  // 对应 tasks.json 中的 label
+				"tooltip": "在当前激活的 Blender 实例中运行脚本"
+			}
+		],
+		"files.exclude": {
+			"**/__pycache__": true
+		},
+	}
+}

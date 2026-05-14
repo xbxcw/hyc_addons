@@ -1,0 +1,57 @@
+import bpy
+from . import operators
+
+# class BasePanel(object):
+#     bl_space_type = "VIEW_3D"
+#     bl_region_type = "UI"
+#     bl_category = "ExampleAddon"
+
+#     @classmethod
+#     def poll(cls, context: bpy.types.Context):
+#         return True
+
+class HYC_PT_panel(bpy.types.Panel):
+    bl_idname = 'HYC_PT_panel'
+    bl_label = "简单面板"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "我的工具"
+
+    def draw(self,context):
+        self.layout.label(text='hello')
+        self.layout.operator(operators.HYC_Create_LOD.bl_idname)
+# @reg_order(0)
+# class ExampleAddonPanel(BasePanel, bpy.types.Panel):
+#     bl_label = "Example Addon Side Bar Panel"
+#     bl_idname = "SCENE_PT_sample"
+
+#     def draw(self, context: bpy.types.Context):
+#         addon_prefs = context.preferences.addons['hyc'].preferences
+
+#         layout = self.layout
+
+#         layout.label(text=i18n("Example Functions") + ": " + str(addon_prefs.number))
+#         layout.prop(addon_prefs, "filepath")
+#         layout.separator()
+
+#         row = layout.row()
+#         row.prop(addon_prefs, "number")
+#         row.prop(addon_prefs, "boolean")
+
+#         layout.operator(ExampleOperator.bl_idname)
+
+#     @classmethod
+#     def poll(cls, context: bpy.types.Context):
+#         return True
+
+
+# # This panel will be drawn after ExampleAddonPanel since it has a higher order value
+# @reg_order(1)
+# class ExampleAddonPanel2(BasePanel, bpy.types.Panel):
+#     bl_label = "Example Addon Side Bar Panel"
+#     bl_idname = "SCENE_PT_sample2"
+
+#     def draw(self, context: bpy.types.Context):
+#         layout = self.layout
+#         layout.label(text="Second Panel")
+#         layout.operator(ExampleOperator.bl_idname)
