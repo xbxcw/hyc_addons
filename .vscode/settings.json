@@ -2,12 +2,8 @@
     "python-envs.pythonProjects": [
         {
             "path": ".",
-            "envManager": "ms-python.python:system",
+            "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
     ],
-    "python.analysis.extraPaths": [
-        // "D:/Documents/Unreal Projects/我的项目/Intermediate/PythonStub",
-        "C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/Lib"
-    ]
 }
