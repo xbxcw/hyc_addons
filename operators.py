@@ -2,6 +2,17 @@ import bpy
 import json
 import os
 
+class HYC_Properties(bpy.types.PropertyGroup):
+    metal_channel = bpy.props.EnumProperty(
+    name='roughness',
+    items=(('R','R','R'),('G','G','G'),('B','B','B'),('A','A','A')),
+    default='G'
+    )
+    rough_channel = bpy.props.EnumProperty(
+        name='roughness',
+        items=(('R','R','R'),('G','G','G'),('B','B','B'),('A','A','A')),
+        default='G'
+    )
 
 class HYC_DragDrop_Json(bpy.types.Operator):
     """处理拖放JSON文件的操作符"""
@@ -77,18 +88,19 @@ class HYC_DragDrop_Json(bpy.types.Operator):
             mat = bpy.data.materials.new(name=matName)
         mat.use_nodes = True
 
-        nodes = mat.node_tree.nodes
-        links = mat.node_tree.links
-        matNode = nodes["Principled BSDF"]
-        return nodes, links, matNode, mat
+        self.nodes = mat.node_tree.nodes
+        self.links = mat.node_tree.links
+        self.matNode = self.nodes["Principled BSDF"]
 
-    def create_textures_node(self, texName, nodes, imgae):
-        if texName in nodes:
+    def create_textures_node(self, texName, imgae):
+        if texName in self.nodes:
 
-            texNode: bpy.types.ShaderNodeTexImage = nodes[texName]
+            texNode: bpy.types.ShaderNodeTexImage = self.nodes[texName]
         else:
 
-            texNode: bpy.types.ShaderNodeTexImage = nodes.new(type="ShaderNodeTexImage")
+            texNode: bpy.types.ShaderNodeTexImage = self.nodes.new(
+                type="ShaderNodeTexImage"
+            )
 
         texNode.name = texName
         texNode.label = texName
@@ -96,7 +108,7 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         return texNode
 
     def create_image(self, imgPath, sRGB=True):
-        imgName: str = os.path.basename(imgPath)
+        imgName: str = os.path.splitext(os.path.basename(imgPath))
         image = bpy.data.images.get(imgName)
         if not image and os.path.exists(imgPath):
             image = bpy.data.images.load(imgPath)
@@ -104,14 +116,29 @@ class HYC_DragDrop_Json(bpy.types.Operator):
             image.colorspace_settings.name = "Non-Color"
 
         image.alpha_mode = "CHANNEL_PACKED"
-        return image
+        return image, imgName
 
-    def link_nodes(self, inNode, outNode):
-        data = self.read_json()
-        for matName, texPaths in data.items():
-            nodes, links, matNode, mat = self.create_materials_node(matName)
-            albedoImgPaht = self.get_value_by_semantic(texPaths,self.Albedo)
-            self.create_image(albedoImgPaht)
+    def create_albedo(self, albedoImgPath):
+
+        albedo, albedoName = self.create_image(albedoImgPath)
+        albedoNode = self.create_textures_node(albedoName, albedo)
+
+    def create_mask(self, maskImgPath):
+
+        mask, maskName = self.create_image(maskImgPath, False)
+        maskNode = self.create_textures_node(maskName, mask)
+        maskMapNode = self.nodes.new(type="ShaderNodeSeparateColor")
+        self.links.new(maskNode["Color"], maskMapNode["Color"])
+
+    def create_normal(self, normalImgPath, dx=False):
+
+        normal, normalName = self.create_image(normalImgPath, False)
+        normalNode = self.create_textures_node(normalName, normal)
+        normalMapNode = self.nodes.new(type="ShaderNodeNormalMap")
+        self.links.new(normalNode.outputs["Color"], normalMapNode.inputs["Color"])
+        self.links.new(normalMapNode.outputs["Normal"], self.matNode.inputs["Normal"])
+        if dx:
+            normalMapNode.convention = "DIRECTX"
 
 
 class HYC_Create_LOD(bpy.types.Operator):

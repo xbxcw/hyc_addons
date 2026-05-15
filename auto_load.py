@@ -39,38 +39,32 @@ def init():
 
 
 def register():
-    """
-    注册插件中所有需要注册的类，并调用各子模块的 register 函数。
-    该函数通常由插件根目录的 register 函数调用。
-    """
-    # 按顺序注册各个类
+    # 按顺序注册所有类（原逻辑不变）
     for cls in ordered_classes:
         bpy.utils.register_class(cls)
+        if cls.__name__ == "HYC_Properties":
+            bpy.types.Scene.hyc_props = bpy.props.PointerProperty(type=cls)
 
-    # 遍历所有子模块，调用其 register 函数（如果有）
+    # 调用子模块register（原逻辑不变）
     for module in modules:
-        if module.__name__ == __name__:   # 跳过当前模块自身
+        if module.__name__ == __name__:
             continue
         if hasattr(module, "register"):
             module.register()
 
-
 def unregister():
-    """
-    反注册插件中的所有类（逆序），并调用各子模块的 unregister 函数。
-    该函数通常由插件根目录的 unregister 函数调用。
-    """
-    # 逆序反注册各个类（与注册顺序相反）
+    if hasattr(bpy.types.Scene, "hyc_props"):
+        del bpy.types.Scene.hyc_props
+    # 逆序注销类（原逻辑不变）
     for cls in reversed(ordered_classes):
         bpy.utils.unregister_class(cls)
 
-    # 遍历所有子模块，调用其 unregister 函数（如果有）
+    # 调用子模块unregister（原逻辑不变）
     for module in modules:
-        if module.__name__ == __name__:   # 跳过当前模块自身
+        if module.__name__ == __name__:
             continue
         if hasattr(module, "unregister"):
             module.unregister()
-
 
 # 模块发现相关函数
 #################################################
