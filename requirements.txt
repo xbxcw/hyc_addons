@@ -1,0 +1,3 @@
+fake-bpy-module-5.0==20260128
+mset==4.5.4
+unreal_stub==0.3

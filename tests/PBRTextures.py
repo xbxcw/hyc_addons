@@ -1,7 +1,6 @@
 import bpy
 import json
 import os
-from pathlib import Path
 Albedo = 'Albedo'
 Normals = 'Normal'
 Mask = 'Mask'
@@ -101,6 +100,8 @@ def connect_pbr_textures_from_json(json_path):
                 img_node.image = img_d
                 img_node.label = 'Diffuse'
                 links.new(img_node.outputs['Color'], principled_bsdf.inputs['Base Color'])
+                # alpha
+                links.new(img_node.outputs['Alpha'], principled_bsdf.inputs['Alpha']) 
                 print(f"    已连接 D: {os.path.basename(d_path)} -> Base Color")
             else:
                 print(f"    警告: D 贴图文件不存在: {d_path}")
@@ -204,6 +205,11 @@ def find_specified_file(path, suffix=''):
 
 # if not json_file.exists():
 #     # 使用指定路径
-json_file = r"E:\work\SM_Plant\Tex\SM_Rosetree_001.json"
+filepath = bpy.data.filepath
+fileName = os.path.basename(filepath)
+workDir = os.path.dirname(filepath)
+jsonName = fileName.replace('blend','json')
 
+json_file = os.path.join(workDir,'Tex',jsonName)
+# print(filepath)
 connect_pbr_textures_from_json(str(json_file))

@@ -122,7 +122,7 @@ class HYC_Create_LOD(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
-        return context.active_object is not None
+        return context.area.type == "VIEW_3D"
 
     def execute(self, context):
         bpy.ops.object.empty_add(
