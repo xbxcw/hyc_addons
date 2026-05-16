@@ -1,5 +1,8 @@
 import bpy
-scene = bpy.context.scene
+import os
+wrokspace = r"E:\work\SM_Plant"
+FileName = "SM_Plant_Potted01_b_036"
+FilePath = os.path.join(wrokspace, FileName + '.blend')
 
-# 获取场景所有属性，过滤出自定义的（排除Blender原生属性）
-print(scene.hyc_props.rough_channel)
+# 打开blend文件
+bpy.ops.wm.open_mainfile(filepath=FilePath)

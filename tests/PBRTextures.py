@@ -126,10 +126,10 @@ def connect_pbr_textures_from_json(json_path):
                 links.new(img_node_m.outputs['Color'], sep_rgb.inputs['Color'])
                 
                 # G 通道 -> 粗糙度
-                links.new(sep_rgb.outputs['Green'], principled_bsdf.inputs['Roughness'])
+                links.new(sep_rgb.outputs['Red'], principled_bsdf.inputs['Roughness'])
                 
                 # B 通道 -> 金属度
-                links.new(sep_rgb.outputs['Blue'], principled_bsdf.inputs['Metallic'])
+                # links.new(sep_rgb.outputs['Blue'], principled_bsdf.inputs['Metallic'])
                 
                 print(f"    已连接 M: {os.path.basename(m_path)}")
                 print(f"      G -> Roughness")

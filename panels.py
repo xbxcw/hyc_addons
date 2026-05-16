@@ -18,8 +18,23 @@ class HYC_PT_panel(bpy.types.Panel):
     bl_category = "我的工具"
 
     def draw(self,context):
-        self.layout.label(text='hello')
-        self.layout.operator(operators.HYC_Create_LOD.bl_idname)
+        layout = self.layout
+        scene = context.scene
+        hyc_props = scene.hyc_props
+        
+        # 横向排列的通道设置行
+        row = layout.row()
+        row.label(text='Mask:')
+        row.prop(hyc_props, "metal_channel", text="M")
+        row.prop(hyc_props, "rough_channel", text="R")
+        row.prop(hyc_props, "occlusion_channel", text="O")
+        row.prop(hyc_props, "directX", text="DirectX")
+        
+        row = layout.row()
+        # row.label(text='LOD Name:')
+        row.prop(hyc_props, "workspaceDir", text="Workspace")
+        # layout.separator()
+        row.operator(operators.HYC_Create_LOD.bl_idname)
 # @reg_order(0)
 # class ExampleAddonPanel(BasePanel, bpy.types.Panel):
 #     bl_label = "Example Addon Side Bar Panel"

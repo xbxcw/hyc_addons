@@ -34,16 +34,21 @@ def init():
     ordered_classes = get_ordered_classes_to_register(modules)
     # 打印顺序结果（调试用）
     print("="*50)
-    print(ordered_classes)
+    for i in ordered_classes:
+        print(i.__name__)
     print("*"*50)
 
 
 def register():
-    # 按顺序注册所有类（原逻辑不变）
+    # 按顺序注册所有类，记录成功注册的类
     for cls in ordered_classes:
-        bpy.utils.register_class(cls)
-        if cls.__name__ == "HYC_Properties":
-            bpy.types.Scene.hyc_props = bpy.props.PointerProperty(type=cls)
+        try:
+            bpy.utils.register_class(cls)
+            if cls.__name__ == "HYC_Properties":
+                bpy.types.Scene.hyc_props = bpy.props.PointerProperty(type=cls)
+        except RuntimeError as e:
+            # 如果注册失败，打印错误信息便于调试
+            print(f"注册失败: {cls.__name__} - {e}")
 
     # 调用子模块register（原逻辑不变）
     for module in modules:
@@ -53,11 +58,20 @@ def register():
             module.register()
 
 def unregister():
-    if hasattr(bpy.types.Scene, "hyc_props"):
-        del bpy.types.Scene.hyc_props
-    # 逆序注销类（原逻辑不变）
+    # 先删除自定义属性，避免依赖问题
+    # if hasattr(bpy.types.Scene, "hyc_props"):
+    #     del bpy.types.Scene.hyc_props
+    
+    # 逆序注销类，添加注册检查避免重复注销错误
     for cls in reversed(ordered_classes):
-        bpy.utils.unregister_class(cls)
+        # 检查类是否已注册（通过检查是否有 bl_rna 属性）
+        if hasattr(cls, 'bl_rna'):
+            try:
+                bpy.utils.unregister_class(cls)
+            except RuntimeError as e:
+                print(f"注册失败: {cls.__name__} - {e}")
+                # 如果注销失败（可能已经被注销），忽略错误
+                pass
 
     # 调用子模块unregister（原逻辑不变）
     for module in modules:
