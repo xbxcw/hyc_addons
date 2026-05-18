@@ -35,6 +35,10 @@ class HYC_PT_panel(bpy.types.Panel):
         row.prop(hyc_props, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
+        layout.separator()
+        layout.label(text='fengdong')
+        row =layout.row()
+        row.operator(operators.HYC_OT_BakeGrassPivotUV.bl_idname)
 # @reg_order(0)
 # class ExampleAddonPanel(BasePanel, bpy.types.Panel):
 #     bl_label = "Example Addon Side Bar Panel"

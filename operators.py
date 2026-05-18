@@ -390,3 +390,88 @@ class HYC_FH_DragJson(bpy.types.FileHandler):
     @classmethod
     def poll_drop(cls, context):
         return context.area.type == "VIEW_3D"
+
+
+class HYC_OT_BakeGrassPivotUV(bpy.types.Operator):
+    """将选中物体的原点坐标烘焙到UV层"""
+
+    bl_idname = "hyc.bake_grass_pivot_uv"
+    bl_label = "烘焙草叶轴心UV"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def get_all_selected_transform_objects(self):
+        """递归获取选中物体及所有子级物体"""
+        result_objs = []
+
+        def collect_child_obj(obj):
+            if obj.type == "MESH":
+                if obj not in result_objs:
+                    result_objs.append(obj)
+            # 递归遍历子物体
+            for child in obj.children:
+                collect_child_obj(child)
+
+        # 遍历所有选中物体
+        for sel_obj in bpy.context.selected_objects:
+            collect_child_obj(sel_obj)
+        return result_objs
+
+    def get_obj_world_origin(self, obj):
+        """获取物体原点世界坐标 (X,Y,Z)"""
+        return obj.matrix_world.translation
+
+    def create_or_switch_uv_layer(self, mesh,grass_pivot_uv_name):
+        """创建GrassPivotUV UV层，不存在则新建"""
+        uv_layers = mesh.uv_layers
+        # 判断是否存在第二个UV层（索引为1）
+        if len(uv_layers) > 1:
+            uv_layer = uv_layers[1]
+        else:
+            # 不存在则创建新的UV层
+            uv_layer = uv_layers.new(name=grass_pivot_uv_name)
+        # 激活目标UV层
+        uv_layers.active = uv_layer
+        return uv_layer
+
+    def execute(self, context):
+        # 全局定义轴心UV集合名
+        grass_pivot_uv_name = "GrassPivotUV"
+
+        # 单位转换：Maya 默认使用厘米(cm)，Blender 默认使用米(m)
+        unity_scale = 100.0  # 1m = 100cm
+        """执行烘焙操作"""
+        selected_meshes = self.get_all_selected_transform_objects()
+        if not selected_meshes:
+            self.report({"WARNING"}, "请至少选中一个模型物体")
+            return {"CANCELLED"}
+
+        for obj in selected_meshes:
+            if obj.type != "MESH":
+                continue
+            self.report({"INFO"}, f"处理物体: {obj.name}")
+
+            mesh = obj.data
+            # 创建并激活目标UV层
+            uv_layer = self.create_or_switch_uv_layer(mesh,grass_pivot_uv_name)
+            if not uv_layer:
+                self.report({"ERROR"}, f"创建UV层失败: {obj.name}")
+                continue
+
+            # 获取物体世界原点
+            world_pos = self.get_obj_world_origin(obj)
+            # Maya vs Blender 坐标系映射:
+            # Maya: X=右, Y=上, Z=前(深度)
+            # Blender: X=右, Y=前(深度), Z=上
+            # 单位转换：Blender 的米 -> Maya 的厘米（乘以 100）
+            u_val = world_pos.x * unity_scale
+            v_val = 1.0 - (-world_pos.y * unity_scale)  # Maya.Z = -Blender.Y
+
+            # 遍历所有顶点UV，统一赋值
+            for uv_data in uv_layer.data:
+                uv_data.uv = (u_val, v_val)
+
+            self.report({"INFO"}, f"赋值完成 U:{u_val:.3f}  V:{v_val:.3f}")
+
+        self.report({"INFO"}, "草叶轴心UV烘焙完成！")
+        print("\n>>> 全部烘焙结束")
+        return {"FINISHED"}
