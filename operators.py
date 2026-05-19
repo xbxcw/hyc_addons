@@ -233,10 +233,21 @@ class HYC_Create_LOD(bpy.types.Operator):
 
     bl_idname = "hyc.create_lod_op"
     bl_label = "创建LOD"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
         return context.area.type == "VIEW_3D"
+
+    def move_to_first_collection(self, obj):
+        """将物体移动到场景的第一个集合"""
+        if bpy.data.collections:
+            first_collection = bpy.data.collections[0]
+            # 从当前所有集合中移除
+            for coll in obj.users_collection:
+                coll.objects.unlink(obj)
+            # 添加到第一个集合
+            first_collection.objects.link(obj)
 
     def create_empty(self, name: str) -> bpy.types.Object:
         """创建空物体并设置属性
@@ -251,6 +262,8 @@ class HYC_Create_LOD(bpy.types.Operator):
             # 如果存在，检查是否有fbx_type属性，没有则添加
             if "fbx_type" not in existing_obj:
                 existing_obj["fbx_type"] = "LodGroup"
+            # 移动到第一个集合
+            self.move_to_first_collection(existing_obj)
             return existing_obj
 
         # 不存在则创建新的空物体
@@ -261,6 +274,8 @@ class HYC_Create_LOD(bpy.types.Operator):
         empty_obj = bpy.context.active_object
         empty_obj["fbx_type"] = "LodGroup"
         empty_obj.name = name
+        # 移动到第一个集合
+        self.move_to_first_collection(empty_obj)
         return empty_obj
 
     def extract_base_name(self, obj_name: str) -> str:
@@ -351,6 +366,10 @@ class HYC_Create_LOD(bpy.types.Operator):
                 bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
                 main_empty = bpy.context.active_object
                 main_empty.name = base_name
+            # 为最顶层空物体添加自定义属性 fbx_type = Transform
+            main_empty["fbx_type"] = "Transform"
+            # 移动到第一个集合
+            self.move_to_first_collection(main_empty)
 
             # 创建 name_LOD 空物体（带 fbx_type 属性）
             lod_empty = self.create_empty(base_name + "_LOD")
@@ -392,6 +411,149 @@ class HYC_FH_DragJson(bpy.types.FileHandler):
         return context.area.type == "VIEW_3D"
 
 
+class HYC_OT_ExportFBX(bpy.types.Operator):
+    """导出选中空物体及其子级为FBX文件"""
+
+    bl_idname = "hyc.export_fbx_op"
+    bl_label = "导出FBX"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def get_hierarchy_objects(self, parent_obj):
+        """递归获取父物体及其所有子级物体（包括空物体和网格）"""
+        objects = []
+
+        def collect_objects(obj):
+            # 收集空物体和网格物体
+            if obj.type == "MESH" or obj.type == "EMPTY":
+                objects.append(obj)
+            for child in obj.children:
+                collect_objects(child)
+
+        collect_objects(parent_obj)
+        return objects
+
+    def export_single_fbx(self, parent_obj, fbx_dir):
+        """导出单个空物体及其层级为FBX"""
+        # 获取层级中的所有物体
+        hierarchy_objects = self.get_hierarchy_objects(parent_obj)
+
+        if not hierarchy_objects:
+            self.report({"WARNING"}, f"空物体 {parent_obj.name} 下没有可导出的物体")
+            return False
+
+        # 构建输出路径
+        fbx_path = os.path.join(fbx_dir, f"{parent_obj.name}.fbx")
+
+        # 取消所有选择
+        bpy.ops.object.select_all(action="DESELECT")
+
+        # 选择层级中的所有物体
+        for obj in hierarchy_objects:
+            obj.select_set(True)
+
+        # 导出FBX - Blender 5.x 版本完整参数（带详细注释）
+        bpy.ops.export_scene.fbx(
+            # ===== 基础设置 =====
+            filepath=fbx_path,  # 导出文件的完整路径
+            check_existing=True,  # 检查文件是否已存在（存在时弹窗询问）
+            filter_glob="*.fbx",  # 文件过滤格式
+            # ===== 选择设置 =====
+            use_selection=True,  # 仅导出选中的物体
+            use_visible=False,  # 导出可见物体
+            use_active_collection=False,  # 导出活动集合中的物体
+            collection="",  # 指定导出的集合名称
+            # ===== 对象类型 =====
+            object_types={"MESH", "EMPTY"},  # 导出的对象类型集合（网格+空物体）
+            # 可选值: 'EMPTY', 'CAMERA', 'LIGHT', 'ARMATURE', 'MESH', 'OTHER'
+            # ===== 缩放设置 =====
+            global_scale=1.0,  # 全局缩放因子
+            apply_unit_scale=True,  # 应用单位缩放（米/厘米等）
+            apply_scale_options="FBX_SCALE_NONE",  # 缩放选项
+            # 可选值: 'FBX_SCALE_NONE', 'FBX_SCALE_UNITS', 'FBX_SCALE_CUSTOM', 'FBX_SCALE_ALL'
+            # ===== 空间变换 =====
+            use_space_transform=True,  # 使用空间变换
+            bake_space_transform=False,  # 将空间变换烘焙到顶点
+            # ===== 轴设置 =====
+            axis_forward="-Z",  # 前向轴（Blender默认）
+            axis_up="Y",  # 向上轴
+            # 可选值: 'X', 'Y', 'Z', '-X', '-Y', '-Z'
+            # ===== 网格设置 =====
+            use_mesh_modifiers=True,  # 应用网格修改器
+            use_mesh_modifiers_render=True,  # 使用渲染时的修改器设置
+            mesh_smooth_type="EDGE",  # 平滑类型
+            # 可选值: 'OFF', 'FACE', 'EDGE', 'SMOOTH_GROUP'
+            colors_type="SRGB",  # 颜色类型
+            # 可选值: 'NONE', 'SRGB', 'LINEAR'
+            prioritize_active_color=False,  # 优先使用活动颜色层
+            use_subsurf=False,  # 导出细分表面
+            use_mesh_edges=False,  # 导出网格边
+            use_tspace=False,  # 导出切线空间数据
+            use_triangles=False,  # 转换为三角形
+            # ===== 自定义属性 =====
+            use_custom_props=True,  # 导出自定义属性到FBX
+            # ===== 骨骼设置 =====
+            add_leaf_bones=False,  # 添加叶骨骼（末端骨骼）
+            primary_bone_axis="Y",  # 主骨骼轴
+            secondary_bone_axis="X",  # 次骨骼轴
+            use_armature_deform_only=False,  # 仅导出蒙皮骨骼
+            armature_nodetype="NULL",  # 骨骼根节点类型
+            # 可选值: 'NULL', 'ROOT', 'LIMBNODE'
+            # ===== 动画烘焙 =====
+            bake_anim=False,  # 是否烘焙动画
+            bake_anim_use_all_bones=False,  # 使用所有骨骼烘焙动画
+            bake_anim_use_nla_strips=False,  # 使用NLA strips烘焙
+            bake_anim_use_all_actions=False,  # 烘焙所有动作
+            bake_anim_force_startend_keying=False,  # 强制首尾关键帧
+            bake_anim_step=1.0,  # 动画采样步长
+            bake_anim_simplify_factor=1.0,  # 动画简化因子（1.0=不简化）
+            # ===== 路径/纹理 =====
+            path_mode="AUTO",  # 纹理路径模式
+            # 可选值: 'AUTO', 'ABSOLUTE', 'RELATIVE', 'MATCH', 'STRIP', 'COPY'
+            embed_textures=False,  # 将纹理嵌入FBX文件
+            # ===== 批处理 =====
+            batch_mode="OFF",  # 批处理模式
+            # 可选值: 'OFF', 'SCENE', 'COLLECTION', 'SCENE_COLLECTION', 'ACTIVE_SCENE_COLLECTION'
+            use_batch_own_dir=True,  # 每个物体使用独立目录
+            # ===== 元数据 =====
+            use_metadata=True,  # 导出元数据
+        )
+
+        self.report({"INFO"}, f"成功导出FBX: {fbx_path}")
+        return True
+
+    def execute(self, context):
+        scene = context.scene
+        props = scene.hyc_props
+        # 获取选中的物体
+        selected_objects = context.selected_objects
+        if not selected_objects:
+            self.report({"WARNING"}, "请先选择空物体")
+            return {"CANCELLED"}
+        # 过滤出所有选中的空物体
+        empty_objects = [obj for obj in selected_objects if obj.type == "EMPTY"]
+        if not empty_objects:
+            self.report({"WARNING"}, "请至少选择一个空物体")
+            return {"CANCELLED"}
+        # 获取工作目录
+        workspace_dir = props.workspaceDir
+        if not workspace_dir:
+            self.report({"WARNING"}, "请先设置工作目录")
+            return {"CANCELLED"}
+        # 创建FBX输出目录
+        fbx_dir = os.path.join(workspace_dir, "Fbx")
+        os.makedirs(fbx_dir, exist_ok=True)
+        # 批量导出每个空物体
+        export_count = 0
+        for parent_obj in empty_objects:
+            if self.export_single_fbx(parent_obj, fbx_dir):
+                export_count += 1
+        if export_count > 0:
+            self.report({"INFO"}, f"共成功导出 {export_count} 个FBX文件")
+        else:
+            self.report({"WARNING"}, "没有成功导出任何FBX文件")
+        return {"FINISHED"}
+
+
 class HYC_OT_BakeGrassPivotUV(bpy.types.Operator):
     """将选中物体的原点坐标烘焙到UV层"""
 
@@ -420,7 +582,7 @@ class HYC_OT_BakeGrassPivotUV(bpy.types.Operator):
         """获取物体原点世界坐标 (X,Y,Z)"""
         return obj.matrix_world.translation
 
-    def create_or_switch_uv_layer(self, mesh,grass_pivot_uv_name):
+    def create_or_switch_uv_layer(self, mesh, grass_pivot_uv_name):
         """创建GrassPivotUV UV层，不存在则新建"""
         uv_layers = mesh.uv_layers
         # 判断是否存在第二个UV层（索引为1）
@@ -452,7 +614,7 @@ class HYC_OT_BakeGrassPivotUV(bpy.types.Operator):
 
             mesh = obj.data
             # 创建并激活目标UV层
-            uv_layer = self.create_or_switch_uv_layer(mesh,grass_pivot_uv_name)
+            uv_layer = self.create_or_switch_uv_layer(mesh, grass_pivot_uv_name)
             if not uv_layer:
                 self.report({"ERROR"}, f"创建UV层失败: {obj.name}")
                 continue
