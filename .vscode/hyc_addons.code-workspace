@@ -1,17 +1,41 @@
 {
-	"folders": [
-		{
-			"path": "..",
-			"name": "Blender"
-		},
-		{
-			"path": "../../hyc_marmosetToolbag_python_wt",
-			"name": "Marmoset Toolbag"
-		},
-		{
-			"path": "../../hyc_ue_python_wt",
-			"name": "UE"
-		}
-	],
-	"settings": {}
+    "folders": [
+        {
+            "name": "Blender",
+            "path": ".."
+        },
+        {
+            "name": "Marmoset Toolbag",
+            "path": "../../hyc_marmosetToolbag_python_wt"
+        },
+        {
+            "name": "UE",
+            "path": "../../hyc_ue_python_wt"
+        }
+    ],
+    "settings": {
+        "files.autoSave": "afterDelay",
+        "python.analysis.autoFormatStrings": true,
+        "python.analysis.typeCheckingMode": "off",
+        "VsCodeTaskButtons.tasks": [
+            {
+                "label": "🎬 Blender: Start",
+                "task": "Blender: Start",
+                "tooltip": "启动 Blender 实例"
+            },
+            {
+                "label": "🚀 Run Script",
+                "task": "Blender: Run Script",
+                "tooltip": "在当前激活的 Blender 实例中运行脚本"
+            },
+            {
+                "label": "🚀 UE Execute",
+                "task": "Unreal: UE execute",
+                "tooltip": "在当前激活的 Blender 实例中运行脚本"
+            }
+        ],
+        "files.exclude": {
+            "**/__pycache__": true
+        }
+    }
 }
