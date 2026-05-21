@@ -1,6 +1,7 @@
 import bpy
 import json
 import os
+from pathlib import Path
 
 
 class HYC_Properties(bpy.types.PropertyGroup):
@@ -86,23 +87,22 @@ class HYC_DragDrop_Json(bpy.types.Operator):
             ],
             Normals: [
                 "Normal",
-                "Normal Map",
-                "WindowNR",
-                "BaseNormal",
-                "NormalMask",
                 "NormalMap",
+                "N",
+                "NR",
+                "NormalMask",
             ],
             Mask: [
-                "ORM",
+                "M",
+                "Mask",
                 "Mix Map",
-                "BaseORM",
+                "AO",
+                "Roughness",
+                "Metallic",
+                "ORM",
             ],
         }
-
-        possible_keys = semantic_map.get(semantic_name)
-        if not possible_keys:  # 没有定义该语义
-            return None
-
+        possible_keys = semantic_map.get(semantic_name, [])
         for key in possible_keys:
             if key in data:
                 return data[key]
@@ -111,10 +111,16 @@ class HYC_DragDrop_Json(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         self.props = scene.hyc_props
-
-        if not self.filepath or not self.filepath.lower().endswith(".json"):
-            self.report({"ERROR"}, "请拖放一个有效的 .json 文件")
+        if not self.props.workspaceDir:
+            self.props.workspaceDir = os.path.dirname(bpy.data.filepath)
+        
+        # 如果没有指定文件路径，且当前文件已保存，则使用默认路径
+        if not self.filepath and bpy.data.filepath:
+            self.filepath = os.path.join(self.props.workspaceDir, 'Tex',os.path.basename(bpy.data.filepath).replace(".blend",".json"))
+        else:
+            self.report({"ERROR"}, "请先保存文件或指定要导入的 JSON 文件路径")
             return {"CANCELLED"}
+
 
         for matName, texName in self.read_json().items():
             self.create_materials_node(matName)
@@ -123,11 +129,18 @@ class HYC_DragDrop_Json(bpy.types.Operator):
             self.create_normal(self.get_value_by_semantic(texName, "Normal"))
             self.create_mask(self.get_value_by_semantic(texName, "Mask"))
 
-        return {"CANCELLED"}
+        return {"FINISHED"}
 
     def read_json(self):
         with open(self.filepath, "r", encoding="utf-8") as f:
             json_data = json.load(f)
+        
+        # 检查JSON中引用的纹理文件是否存在
+        for mat_name, textures in json_data.items():
+            for tex_key, tex_path in textures.items():
+                if tex_path and not os.path.exists(tex_path):
+                    self.report({"WARNING"}, f"材质 {mat_name} 的纹理 {tex_key} 不存在: {tex_path}")
+        
         return json_data
 
     def create_materials_node(self, matName: str):
@@ -156,14 +169,14 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         return texNode
 
     def create_image(self, imgPath, sRGB=True):
-        imgName: str = os.path.splitext(os.path.basename(imgPath))[0]
+        imgName: str = Path(imgPath).stem
         image = bpy.data.images.get(imgName)
         if not image and os.path.exists(imgPath):
             image = bpy.data.images.load(imgPath)
         if sRGB is False:
             image.colorspace_settings.name = "Non-Color"
-
-        image.alpha_mode = "CHANNEL_PACKED"
+        if image:
+            image.alpha_mode = "CHANNEL_PACKED"
         return image, imgName
 
     def create_albedo(self, albedoImgPath):
@@ -225,7 +238,7 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         self.links.new(normalNode.outputs["Color"], normalMapNode.inputs["Color"])
         self.links.new(normalMapNode.outputs["Normal"], self.matNode.inputs["Normal"])
         if self.props.directX:
-            normalMapNode.convention = "DIRECTX"
+            normalMapNode.convention = ["DIRECTX"]
 
 
 class HYC_Create_LOD(bpy.types.Operator):

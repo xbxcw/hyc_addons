@@ -22,21 +22,23 @@ class HYC_PT_panel(bpy.types.Panel):
         scene = context.scene
         hyc_props = scene.hyc_props
         
-        # 横向排列的通道设置行
-        row = layout.row()
-        row.label(text='Mask:')
-        row.prop(hyc_props, "metal_channel", text="M")
-        row.prop(hyc_props, "rough_channel", text="R")
-        row.prop(hyc_props, "occlusion_channel", text="O")
-        row.prop(hyc_props, "directX", text="DirectX")
+        # 横向排列的通道设置行（紧凑版）
+        row = layout.row(align=True)
+        row.scale_x = 0.95  # 稍微缩小水平间距
+        row.label(icon='TEXTURE')
+        row.prop(hyc_props, "metal_channel")
+        row.prop(hyc_props, "rough_channel")
+        row.prop(hyc_props, "occlusion_channel")
+        row.prop(hyc_props, "directX", text="DX")
+        row.operator(operators.HYC_DragDrop_Json.bl_idname, text="", icon='IMPORT')
         
         row = layout.row()
-        # row.label(text='LOD Name:')
         row.prop(hyc_props, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
         row.operator(operators.HYC_OT_ExportFBX.bl_idname)
         layout.separator()
+
         layout.label(text='fengdong')
         row =layout.row()
         # 设置风动uv
