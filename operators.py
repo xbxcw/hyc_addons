@@ -269,56 +269,99 @@ class HYC_MaterialCreator:
 # 操作符类 - 协调JSON读取和材质创建
 # ============================================
 class HYC_DragDrop_Json(bpy.types.Operator):
-    """处理拖放JSON文件或JSON文件夹的操作符"""
+    """处理拖放JSON文件、多个JSON文件或JSON文件夹的操作符"""
 
     bl_idname = "hyc.drag_json_op"
     bl_label = "拖放导入JSON"
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH", options={"SKIP_SAVE"})  # type: ignore
+    directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'SKIP_SAVE', 'HIDDEN'})  # type: ignore
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'SKIP_SAVE', 'HIDDEN'})  # type: ignore
+
+    def load_single_json(self, json_path: str) -> dict:
+        """加载单个JSON文件并返回 {材质名: {参数: 路径}} 结构"""
+        result = {}
+        try:
+            json_reader = HYC_JsonReader(json_path)
+            mat_data = json_reader.read_json()
+            # 获取文件名（不带扩展名）作为材质名
+            mat_name = os.path.basename(json_path)[:-5]  # 去掉 .json
+            # 确保结构是 {材质名: {参数名: 路径}}
+            if isinstance(mat_data, dict):
+                result[mat_name] = mat_data
+            else:
+                result[mat_name] = {"path": str(mat_data) if mat_data else ""}
+        except Exception as e:
+            self.report({"WARNING"}, f"读取JSON文件失败 {json_path}: {e}")
+        return result
 
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
         
+        # 打印拖放的文件信息
+        print("\n=== 拖放文件信息 ===")
+        print(f"filepath: {self.filepath}")
+        print(f"directory: {self.directory}")
+        print(f"files count: {len(self.files)}")
+        if self.files:
+            for i, file_item in enumerate(self.files):
+                filename = getattr(file_item, "name", str(file_item))
+                print(f"  文件 {i+1}: {filename}")
+        print("===================")
+        
         # 设置默认工作目录
         if not props.workspaceDir:
             props.workspaceDir = os.path.dirname(bpy.data.filepath)
         
-        # 构建文件路径
-        if not self.filepath:
+        json_data = {}
+        
+        # 情况1: 通过 files 属性拖放多个文件
+        if self.files and len(self.files) > 0:
+            base_path = self.directory if self.directory else os.path.dirname(self.filepath)
+            print(f"检测到 {len(self.files)} 个拖放文件，基础路径: {base_path}")
+            for i, file_item in enumerate(self.files):
+                filename = getattr(file_item, "name", "")
+                if filename and filename.endswith(".json"):
+                    json_path = os.path.join(base_path, filename)
+                    print(f"  处理文件 {i+1}: {json_path}")
+                    mat_data = self.load_single_json(json_path)
+                    json_data.update(mat_data)
+            
+            if not json_data:
+                self.report({"WARNING"}, "没有找到有效的JSON文件")
+                return {"CANCELLED"}
+        
+        # 情况2: 通过 filepath 属性（单个文件或文件夹）
+        elif self.filepath:
+            # 判断是文件还是文件夹
+            if os.path.isdir(self.filepath):
+                # 从JSON文件夹加载所有材质
+                json_data = HYC_JsonReader.load_materials_from_folder(self.filepath)
+                if not json_data:
+                    self.report({"WARNING"}, f"JSON文件夹中没有找到有效的材质文件: {self.filepath}")
+                    return {"CANCELLED"}
+            else:
+                # 从单个JSON文件读取
+                json_data = self.load_single_json(self.filepath)
+        
+        # 情况3: 没有提供路径，尝试自动查找
+        else:
             if bpy.data.filepath:
                 # 优先从JSON文件夹读取
                 json_folder = os.path.join(props.workspaceDir, 'JSON')
                 if os.path.exists(json_folder):
-                    json_path = json_folder
+                    json_data = HYC_JsonReader.load_materials_from_folder(json_folder)
                 else:
                     # 兼容旧格式：从Tex文件夹读取
                     json_path = os.path.join(props.workspaceDir, 'Tex', 
                                             os.path.basename(bpy.data.filepath).replace(".blend", ".json"))
-                self.filepath = json_path
-            else:
+                    if os.path.exists(json_path):
+                        json_data = self.load_single_json(json_path)
+            
+            if not json_data:
                 self.report({"ERROR"}, "请先保存文件或指定要导入的 JSON 文件/文件夹路径")
                 return {"CANCELLED"}
-
-        # 判断是文件还是文件夹
-        json_data = {}
-        if os.path.isdir(self.filepath):
-            # 从JSON文件夹加载所有材质
-            json_data = HYC_JsonReader.load_materials_from_folder(self.filepath)
-            if not json_data:
-                self.report({"WARNING"}, f"JSON文件夹中没有找到有效的材质文件: {self.filepath}")
-                return {"CANCELLED"}
-        else:
-            # 从单个JSON文件读取，包装成 {"文件名": {内容}} 结构
-            json_reader = HYC_JsonReader(self.filepath)
-            mat_data = json_reader.read_json()
-            # 获取文件名（不带扩展名）作为材质名
-            mat_name = os.path.basename(self.filepath)[:-5]  # 去掉 .json
-            # 确保结构是 {材质名: {参数名: 路径}}
-            if isinstance(mat_data, dict):
-                json_data[mat_name] = mat_data
-            else:
-                json_data[mat_name] = {"path": str(mat_data) if mat_data else ""}
 
         # 创建JSON读取器实例用于验证
         json_reader = HYC_JsonReader(self.filepath)
@@ -538,12 +581,13 @@ class HYC_Create_LOD(bpy.types.Operator):
 
 
 class HYC_FH_DragJson(bpy.types.FileHandler):
-    """用于在3D视图中拖放 .json 文件的文件处理器"""
+    """用于在3D视图中拖放 .json 文件的文件处理器（支持多选）"""
 
     bl_idname = "HYC_FH_DragJson"
     bl_label = "拖放导入 JSON 文件"
     bl_import_operator = "hyc.drag_json_op"
     bl_file_extensions = ".json"
+    bl_file_selector = False  # 禁用文件选择对话框
 
     @classmethod
     def poll_drop(cls, context):
