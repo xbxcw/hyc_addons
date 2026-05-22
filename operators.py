@@ -56,12 +56,12 @@ class HYC_Properties(bpy.types.PropertyGroup):
 # JSON读取器类 - 负责读取和验证JSON文件
 # ============================================
 class HYC_JsonReader:
-    """JSON文件读取器"""
+    """JSON文件读取器 - 支持按材质名单独的JSON文件"""
     
     # 语义名称映射
     SEMANTIC_MAP = {
-        "Albedo": ["D", "Albedo", "D/DA", "WindowBase", "BaseAlbedo (A:Height)", "DA", "ColorOpacity"],
-        "Normal": ["Normal", "NormalMap", "N", "NR", "NormalMask"],
+        "Albedo": ["D", "Albedo", "D/DA", "WindowBase", "BaseAlbedo (A:Height)", "DA", "ColorOpacity", "Base Color"],
+        "Normal": ["Normal", "NormalMap", "N", "NR", "NormalMask", "Normal Map"],
         "Mask": ["M", "Mask", "Mix Map", "AO", "Roughness", "Metallic", "ORM"],
     }
     
@@ -73,17 +73,20 @@ class HYC_JsonReader:
         with open(self.filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     
-    def validate_textures(self, json_data: dict) -> list:
+    def validate_textures(self, json_data: dict, mat_name: str = "") -> list:
         """验证JSON中引用的纹理文件是否存在
         
+        参数:
+            json_data: dict, 材质的纹理数据
+            mat_name: str, 材质名称（用于警告信息）
+            
         返回:
             缺失文件的警告信息列表
         """
         warnings = []
-        for mat_name, textures in json_data.items():
-            for tex_key, tex_path in textures.items():
-                if tex_path and not os.path.exists(tex_path):
-                    warnings.append(f"材质 {mat_name} 的纹理 {tex_key} 不存在: {tex_path}")
+        for tex_key, tex_path in json_data.items():
+            if tex_path and not os.path.exists(tex_path):
+                warnings.append(f"材质 {mat_name} 的纹理 {tex_key} 不存在: {tex_path}")
         return warnings
     
     @classmethod
@@ -103,6 +106,49 @@ class HYC_JsonReader:
             if key in data:
                 return data[key]
         return None
+    
+    @classmethod
+    def load_materials_from_folder(cls, json_folder: str) -> dict:
+        """
+        从JSON文件夹加载所有材质JSON文件
+        
+        参数:
+            json_folder: str, JSON文件夹路径
+            
+        返回:
+            dict, 材质名 -> 纹理数据的字典，结构: {"文件名": {参数名: 路径}}
+        """
+        materials_data = {}
+        
+        if not os.path.exists(json_folder):
+            print(f"JSON文件夹不存在: {json_folder}")
+            return materials_data
+        
+        # 遍历文件夹中的所有json文件
+        for filename in os.listdir(json_folder):
+            if filename.endswith(".json"):
+                mat_name = filename[:-5]  # 去掉 .json 后缀
+                json_path = os.path.join(json_folder, filename)
+                try:
+                    reader = cls(json_path)
+                    mat_data = reader.read_json()
+                    
+                    # 确保返回结构是 {"文件名": {参数名: 路径}}
+                    if isinstance(mat_data, dict):
+                        # 如果是字典，直接使用
+                        materials_data[mat_name] = mat_data
+                    elif isinstance(mat_data, str):
+                        # 如果是字符串（可能是路径），包装成字典
+                        materials_data[mat_name] = {"path": mat_data}
+                    else:
+                        # 其他类型，记录错误
+                        materials_data[mat_name] = {}
+                        print(f"警告: {filename} 内容格式不支持")
+                        
+                except Exception as e:
+                    print(f"读取JSON文件失败 {filename}: {e}")
+        
+        return materials_data
 
 
 # ============================================
@@ -223,7 +269,7 @@ class HYC_MaterialCreator:
 # 操作符类 - 协调JSON读取和材质创建
 # ============================================
 class HYC_DragDrop_Json(bpy.types.Operator):
-    """处理拖放JSON文件的操作符"""
+    """处理拖放JSON文件或JSON文件夹的操作符"""
 
     bl_idname = "hyc.drag_json_op"
     bl_label = "拖放导入JSON"
@@ -241,18 +287,48 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         # 构建文件路径
         if not self.filepath:
             if bpy.data.filepath:
-                self.filepath = os.path.join(props.workspaceDir, 'Tex', 
+                # 优先从JSON文件夹读取
+                json_folder = os.path.join(props.workspaceDir, 'JSON')
+                if os.path.exists(json_folder):
+                    json_path = json_folder
+                else:
+                    # 兼容旧格式：从Tex文件夹读取
+                    json_path = os.path.join(props.workspaceDir, 'Tex', 
                                             os.path.basename(bpy.data.filepath).replace(".blend", ".json"))
+                self.filepath = json_path
             else:
-                self.report({"ERROR"}, "请先保存文件或指定要导入的 JSON 文件路径")
+                self.report({"ERROR"}, "请先保存文件或指定要导入的 JSON 文件/文件夹路径")
                 return {"CANCELLED"}
 
-        # 创建JSON读取器并读取数据
+        # 判断是文件还是文件夹
+        json_data = {}
+        if os.path.isdir(self.filepath):
+            # 从JSON文件夹加载所有材质
+            json_data = HYC_JsonReader.load_materials_from_folder(self.filepath)
+            if not json_data:
+                self.report({"WARNING"}, f"JSON文件夹中没有找到有效的材质文件: {self.filepath}")
+                return {"CANCELLED"}
+        else:
+            # 从单个JSON文件读取，包装成 {"文件名": {内容}} 结构
+            json_reader = HYC_JsonReader(self.filepath)
+            mat_data = json_reader.read_json()
+            # 获取文件名（不带扩展名）作为材质名
+            mat_name = os.path.basename(self.filepath)[:-5]  # 去掉 .json
+            # 确保结构是 {材质名: {参数名: 路径}}
+            if isinstance(mat_data, dict):
+                json_data[mat_name] = mat_data
+            else:
+                json_data[mat_name] = {"path": str(mat_data) if mat_data else ""}
+
+        # 创建JSON读取器实例用于验证
         json_reader = HYC_JsonReader(self.filepath)
-        json_data = json_reader.read_json()
         
         # 验证纹理文件
-        warnings = json_reader.validate_textures(json_data)
+        warnings = []
+        for mat_name, textures in json_data.items():
+            mat_warnings = json_reader.validate_textures(textures, mat_name)
+            warnings.extend(mat_warnings)
+        
         for warning in warnings:
             self.report({"WARNING"}, warning)
 
@@ -260,20 +336,34 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         mat_creator = HYC_MaterialCreator(props)
 
         # 遍历材质并创建
+        success_count = 0
         for mat_name, textures in json_data.items():
+            # 确保 textures 是字典
+            if not isinstance(textures, dict):
+                self.report({"WARNING"}, f"材质 {mat_name} 的数据格式错误，跳过")
+                continue
+            
             mat_creator.create_materials_node(mat_name)
 
             albedo_path = HYC_JsonReader.get_value_by_semantic(textures, "Albedo")
             normal_path = HYC_JsonReader.get_value_by_semantic(textures, "Normal")
             mask_path = HYC_JsonReader.get_value_by_semantic(textures, "Mask")
             
+            has_texture = False
             if albedo_path:
                 mat_creator.create_albedo(albedo_path)
+                has_texture = True
             if normal_path:
                 mat_creator.create_normal(normal_path)
+                has_texture = True
             if mask_path:
                 mat_creator.create_mask(mask_path)
+                has_texture = True
+            
+            if has_texture:
+                success_count += 1
 
+        self.report({"INFO"}, f"成功导入 {success_count} 个材质")
         return {"FINISHED"}
 
 
