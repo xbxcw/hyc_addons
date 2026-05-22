@@ -31,10 +31,18 @@ def parse_arguments():
 # 全局存储已导出的贴图，避免重复导出
 exported_textures = {}
 
+# 全局存储材质数据，按材质名汇总
+material_data_dict = {}
+
 # ====================== 配置项 ======================
-export_folder = r"E:\work\SM_Plant"  # 导出目录
+
+
+export_folder = r"C:\Users\Administrator\Desktop\temp"  # 导出目录
+
+
 fbxDir = os.path.join(export_folder, "original")
 texDir = os.path.join(export_folder, "Tex")
+jsonDir = os.path.join(export_folder, "JSON")
 # 贴图名称后缀筛选规则
 texture_suffixes = ("_D", "_DA", "_M", "_MR", "_N", "_NR", "_H", "_B", "_m")
 # ====================================================
@@ -213,36 +221,40 @@ def process_static_mesh(mesh):
                 if not local_path:
                     continue
 
-                if mat_name not in current_model_data:
-                    current_model_data[mat_name] = {}
-                # 使用绝对路径存储到JSON
-                current_model_data[mat_name][param_name] = local_path
+                # 按材质名汇总数据到全局字典
+                if mat_name not in material_data_dict:
+                    material_data_dict[mat_name] = {}
+                # 使用绝对路径存储
+                material_data_dict[mat_name][param_name] = local_path
                 print(f"├─ 材质：{mat_name} | 参数：{param_name} | 路径：{local_path}")
 
             except Exception as e:
                 continue
 
-    # 生成JSON文件
-    save_model_json(mesh_name, current_model_data)
+    print(f"└─ 模型 {mesh_name} 处理完成")
 
 
-def save_model_json(mesh_name, model_data):
-    """保存模型的JSON配置文件"""
-    if not model_data:
-        print(f"⚠️ 模型 {mesh_name} 未找到符合条件的贴图参数")
+def save_material_json():
+    """按材质名保存JSON配置文件"""
+    if not material_data_dict:
+        print("⚠️ 未找到任何符合条件的材质")
         return
 
-    json_filename = f"{mesh_name}.json"
-    json_file_path = os.path.join(texDir, json_filename)
-    
-    # 先删除旧文件
-    if os.path.exists(json_file_path):
-        os.remove(json_file_path)
-        print(f"已删除旧JSON文件: {json_filename}")
-    
-    with open(json_file_path, "w", encoding="utf-8") as f:
-        json.dump(model_data, f, ensure_ascii=False, indent=2)
-    print(f"✅ 模型 {mesh_name} JSON 已保存：{json_filename}")
+    # 创建JSON目录
+    os.makedirs(jsonDir, exist_ok=True)
+
+    for mat_name, mat_params in material_data_dict.items():
+        json_filename = f"{mat_name}.json"
+        json_file_path = os.path.join(jsonDir, json_filename)
+        
+        # 先删除旧文件
+        if os.path.exists(json_file_path):
+            os.remove(json_file_path)
+            print(f"已删除旧JSON文件: {json_filename}")
+        
+        with open(json_file_path, "w", encoding="utf-8") as f:
+            json.dump(mat_params, f, ensure_ascii=False, indent=2)
+        print(f"✅ 材质 {mat_name} JSON 已保存：{json_file_path}")
 
 
 def main():
@@ -255,9 +267,12 @@ def main():
         print("请在内容浏览器中选择静态网格体！")
         return
     
-    # 遍历每个模型，单独生成JSON
+    # 遍历每个模型，收集材质数据
     for mesh in static_meshes:
         process_static_mesh(mesh)
+
+    # 按材质名生成JSON文件
+    save_material_json()
 
     print("\n========================================")
     print("所有模型处理完成！")
