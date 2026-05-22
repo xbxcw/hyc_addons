@@ -1,6 +1,3 @@
-import unreal
+import os 
 
-actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-select_actors = actor_subsystem.get_selected_level_actors() # type: ignore
-
-print(select_actors[0])
+print(os.path.exists("E:\\work\\SM_Plant\\Tex\\T_Plant_Potted01_b_011_Billboard_NR.tga"))

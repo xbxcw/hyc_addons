@@ -28,18 +28,16 @@ def parse_arguments():
 # target_path = params.get('p')
 # target_path = r(target_path)
 
+# 全局存储已导出的贴图，避免重复导出
+exported_textures = {}
+
 # ====================== 配置项 ======================
-# export_folder = target_path  # 导出目录
-export_folder = r"E:\work\LV_FloatingCastle_LA"
+export_folder = r"E:\work\SM_Plant"  # 导出目录
 fbxDir = os.path.join(export_folder, "original")
 texDir = os.path.join(export_folder, "Tex")
 # 贴图名称后缀筛选规则
 texture_suffixes = ("_D", "_DA", "_M", "_MR", "_N", "_NR", "_H", "_B", "_m")
 # ====================================================
-
-# 获取内容浏览器选中的静态网格体
-selected_assets = unreal.EditorUtilityLibrary.get_selected_assets()
-static_meshes = unreal.EditorFilterLibrary.by_class(selected_assets, unreal.StaticMesh)
 
 
 def get_texture_suffix_key(texture_name):
@@ -51,14 +49,20 @@ def get_texture_suffix_key(texture_name):
 
 
 def export_texture_to_tga(texture, output_dir):
-    """导出贴图为TGA"""
+    """先尝试导出TGA，如果失败则导出EXR（通过检查文件是否存在来确认成功）"""
     os.makedirs(output_dir, exist_ok=True)
     texture_name = texture.get_name()
-    filename = os.path.join(output_dir, f"{texture_name}.tga")
-
+    
+    # 先尝试导出TGA
+    tga_filename = os.path.join(output_dir, f"{texture_name}.tga")
+    
+    # 删除可能存在的旧文件（确保可以检测新文件是否被创建）
+    if os.path.exists(tga_filename):
+        os.remove(tga_filename)
+    
     task = unreal.AssetExportTask()
     task.object = texture
-    task.filename = filename
+    task.filename = tga_filename
     task.automated = True
     task.prompt = False
     task.replace_identical = True
@@ -68,10 +72,40 @@ def export_texture_to_tga(texture, output_dir):
             unreal.Exporter.run_asset_export_task(task)
         else:
             unreal.Exporter.run_asset_export_tasks([task])
-        return filename
+        
+        # 验证文件是否成功创建
+        if os.path.exists(tga_filename) and os.path.getsize(tga_filename) > 0:
+            print(f"✅ 贴图 {texture_name}.tga 已导出")
+            return tga_filename
+        else:
+            print(f"⚠️ TGA导出后文件不存在或为空: {texture_name}")
     except Exception as e:
-        print(f"导出失败: {texture_name}，错误: {e}")
-        return None
+        print(f"⚠️ TGA导出失败: {texture_name}，错误: {e}")
+    
+    # TGA失败，尝试导出EXR
+    exr_filename = os.path.join(output_dir, f"{texture_name}.exr")
+    
+    # 删除可能存在的旧文件
+    if os.path.exists(exr_filename):
+        os.remove(exr_filename)
+    
+    task.filename = exr_filename
+    try:
+        if hasattr(unreal.Exporter, "run_asset_export_task"):
+            unreal.Exporter.run_asset_export_task(task)
+        else:
+            unreal.Exporter.run_asset_export_tasks([task])
+        
+        # 验证文件是否成功创建
+        if os.path.exists(exr_filename) and os.path.getsize(exr_filename) > 0:
+            print(f"✅ 贴图 {texture_name}.exr 已导出")
+            return exr_filename
+        else:
+            print(f"❌ EXR导出后文件不存在或为空: {texture_name}")
+    except Exception as exr_e:
+        print(f"❌ EXR导出也失败: {texture_name}，错误: {exr_e}")
+    
+    return None
 
 
 def export_static_mesh_to_fbx(mesh, output_dir):
@@ -127,81 +161,107 @@ def get_static_mesh_materials(mesh):
     return materials
 
 
-# 全局存储已导出的贴图，避免重复导出
-exported_textures = {}
+def process_static_mesh(mesh):
+    """处理单个静态网格体，导出模型和贴图"""
+    mesh_name = mesh.get_name()
+    print(f"\n========================================")
+    print(f"开始处理模型：{mesh_name}")
 
-if not static_meshes:
-    print("请在内容浏览器中选择静态网格体！")
-else:
-    # 遍历每个模型，单独生成JSON
-    for mesh in static_meshes:
-        mesh_name = mesh.get_name()
-        print(f"\n========================================")
-        print(f"开始处理模型：{mesh_name}")
+    # 导出模型本身
+    export_static_mesh_to_fbx(mesh, fbxDir)
 
-        # ----- 新增：导出模型本身 -----
-        export_static_mesh_to_fbx(mesh, fbxDir)
-        # ----------------------------
+    # 每个模型独立的JSON数据结构：材质名 → 参数名:路径
+    current_model_data = {}
+    materials = get_static_mesh_materials(mesh)
 
-        # 每个模型独立的JSON数据结构：材质名 → 参数名:路径
-        current_model_data = {}
-        materials = get_static_mesh_materials(mesh)
+    for idx, material in materials:
+        mat_name = material.get_name()
 
-        for idx, material in materials:
-            mat_name = material.get_name()
+        # 只处理材质实例
+        if not isinstance(
+            material, (unreal.MaterialInstanceConstant, unreal.MaterialInstance)
+        ):
+            continue
 
-            # 只处理材质实例
-            if not isinstance(
-                material, (unreal.MaterialInstanceConstant, unreal.MaterialInstance)
-            ):
-                continue
+        try:
+            texture_params = material.get_editor_property(
+                "texture_parameter_values"
+            )
+        except:
+            texture_params = []
 
+        for param in texture_params:
             try:
-                texture_params = material.get_editor_property(
-                    "texture_parameter_values"
-                )
-            except:
-                texture_params = []
+                param_info = param.get_editor_property("parameter_info")
+                param_name = str(param_info.get_editor_property("name"))
 
-            for param in texture_params:
-                try:
-                    param_info = param.get_editor_property("parameter_info")
-                    param_name = str(param_info.get_editor_property("name"))
-
-                    texture = param.get_editor_property("parameter_value")
-                    if not texture or not isinstance(texture, unreal.Texture):
-                        continue
-
-                    if not get_texture_suffix_key(texture.get_name()):
-                        continue
-
-                    tex_path = texture.get_path_name()
-                    if tex_path not in exported_textures:
-                        local_path = export_texture_to_tga(texture, texDir)
-                        exported_textures[tex_path] = local_path
-                    else:
-                        local_path = exported_textures[tex_path]
-
-                    if not local_path:
-                        continue
-
-                    if mat_name not in current_model_data:
-                        current_model_data[mat_name] = {}
-                    current_model_data[mat_name][param_name] = local_path
-                    print(f"├─ 材质：{mat_name} | 参数：{param_name}")
-
-                except Exception as e:
+                texture = param.get_editor_property("parameter_value")
+                if not texture or not isinstance(texture, unreal.Texture):
                     continue
 
-        # 为当前模型生成独立JSON文件（文件名=模型名.json）
-        if current_model_data:
-            json_filename = f"{mesh_name}.json"
-            json_file_path = os.path.join(texDir, json_filename)
-            with open(json_file_path, "w", encoding="utf-8") as f:
-                json.dump(current_model_data, f, ensure_ascii=False, indent=2)
-            print(f"✅ 模型 {mesh_name} JSON 已保存：{json_filename}")
-        else:
-            print(f"⚠️ 模型 {mesh_name} 未找到符合条件的贴图参数")
+                if not get_texture_suffix_key(texture.get_name()):
+                    continue
+
+                tex_path = texture.get_path_name()
+                if tex_path not in exported_textures or not os.path.exists(exported_textures[tex_path]):
+                    # 如果缓存中没有，或者缓存的文件不存在，则重新导出
+                    local_path = export_texture_to_tga(texture, texDir)
+                    exported_textures[tex_path] = local_path
+                else:
+                    local_path = exported_textures[tex_path]
+
+                if not local_path:
+                    continue
+
+                if mat_name not in current_model_data:
+                    current_model_data[mat_name] = {}
+                # 使用绝对路径存储到JSON
+                current_model_data[mat_name][param_name] = local_path
+                print(f"├─ 材质：{mat_name} | 参数：{param_name} | 路径：{local_path}")
+
+            except Exception as e:
+                continue
+
+    # 生成JSON文件
+    save_model_json(mesh_name, current_model_data)
+
+
+def save_model_json(mesh_name, model_data):
+    """保存模型的JSON配置文件"""
+    if not model_data:
+        print(f"⚠️ 模型 {mesh_name} 未找到符合条件的贴图参数")
+        return
+
+    json_filename = f"{mesh_name}.json"
+    json_file_path = os.path.join(texDir, json_filename)
+    
+    # 先删除旧文件
+    if os.path.exists(json_file_path):
+        os.remove(json_file_path)
+        print(f"已删除旧JSON文件: {json_filename}")
+    
+    with open(json_file_path, "w", encoding="utf-8") as f:
+        json.dump(model_data, f, ensure_ascii=False, indent=2)
+    print(f"✅ 模型 {mesh_name} JSON 已保存：{json_filename}")
+
+
+def main():
+    """主函数：处理所有选中的静态网格体"""
+    # 获取内容浏览器选中的静态网格体
+    selected_assets = unreal.EditorUtilityLibrary.get_selected_assets()
+    static_meshes = unreal.EditorFilterLibrary.by_class(selected_assets, unreal.StaticMesh)
+    
+    if not static_meshes:
+        print("请在内容浏览器中选择静态网格体！")
+        return
+    
+    # 遍历每个模型，单独生成JSON
+    for mesh in static_meshes:
+        process_static_mesh(mesh)
 
     print("\n========================================")
     print("所有模型处理完成！")
+
+
+if __name__ == "__main__":
+    main()
