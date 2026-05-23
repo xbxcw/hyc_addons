@@ -30,7 +30,7 @@ class HYC_PT_panel(bpy.types.Panel):
         row.prop(hyc_props, "rough_channel")
         row.prop(hyc_props, "occlusion_channel")
         row.prop(hyc_props, "directX", text="DX")
-        row.operator(operators.HYC_DragDrop_Json.bl_idname, text="", icon='IMPORT')
+        row.operator(operators.HYC_OT_AutoImportJson.bl_idname, text="", icon='IMPORT')
         
         row = layout.row()
         row.prop(hyc_props, "workspaceDir", text="Workspace")

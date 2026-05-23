@@ -1,268 +1,8 @@
 import bpy
-import json
 import os
-from pathlib import Path
 
-
-class HYC_Properties(bpy.types.PropertyGroup):
-
-    metal_channel: bpy.props.EnumProperty(
-        name="Metallic",
-        items=(
-            ("Red", "R", "Red"),
-            ("Green", "G", "Green"),
-            ("Blue", "B", "Blue"),
-            ("Alpha", "A", "A"),
-            ("0", "off", "Off"),
-        ),
-        default="Blue",
-    )  # type: ignore
-    rough_channel: bpy.props.EnumProperty(
-        name="roughness",
-        items=(
-            ("Red", "R", "Red"),
-            ("Green", "G", "Green"),
-            ("Blue", "B", "Blue"),
-            ("Alpha", "A", "A"),
-            ("0", "off", "Off"),
-        ),
-        default="Green",
-    )  # type: ignore
-    occlusion_channel: bpy.props.EnumProperty(
-        name="AO",
-        items=(
-            ("Red", "R", "Red"),
-            ("Green", "G", "Green"),
-            ("Blue", "B", "Blue"),
-            ("Alpha", "A", "A"),
-            ("0", "off", "Off"),
-        ),
-        default="Red",
-    )  # type: ignore
-    directX: bpy.props.BoolProperty(
-        name="directX",
-        default=True,
-        description="是否使用DirectX渲染",
-    )  # type: ignore
-    workspaceDir: bpy.props.StringProperty(
-        name="workspaceDir",
-        default="",
-        subtype="DIR_PATH",  # 显示为目录选择窗口
-        description="选择工作目录",
-    )  # type: ignore
-
-
-# ============================================
-# JSON读取器类 - 负责读取和验证JSON文件
-# ============================================
-class HYC_JsonReader:
-    """JSON文件读取器 - 支持按材质名单独的JSON文件"""
-    
-    # 语义名称映射
-    SEMANTIC_MAP = {
-        "Albedo": ["D", "Albedo", "D/DA", "WindowBase", "BaseAlbedo (A:Height)", "DA", "ColorOpacity", "Base Color"],
-        "Normal": ["Normal", "NormalMap", "N", "NR", "NormalMask", "Normal Map"],
-        "Mask": ["M", "Mask", "Mix Map", "AO", "Roughness", "Metallic", "ORM"],
-    }
-    
-    def __init__(self, filepath: str):
-        self.filepath = filepath
-    
-    def read_json(self) -> dict:
-        """读取JSON文件并返回数据"""
-        with open(self.filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    
-    def validate_textures(self, json_data: dict, mat_name: str = "") -> list:
-        """验证JSON中引用的纹理文件是否存在
-        
-        参数:
-            json_data: dict, 材质的纹理数据
-            mat_name: str, 材质名称（用于警告信息）
-            
-        返回:
-            缺失文件的警告信息列表
-        """
-        warnings = []
-        for tex_key, tex_path in json_data.items():
-            if tex_path and not os.path.exists(tex_path):
-                warnings.append(f"材质 {mat_name} 的纹理 {tex_key} 不存在: {tex_path}")
-        return warnings
-    
-    @classmethod
-    def get_value_by_semantic(cls, data: dict, semantic_name: str) -> str | None:
-        """
-        根据语义名称从字典中获取第一个存在的 key 对应的值。
-
-        参数:
-            data: dict, 原始字典
-            semantic_name: str, 语义名（如 "Albedo"）
-
-        返回:
-            对应的值；如果都不存在则返回 None
-        """
-        possible_keys = cls.SEMANTIC_MAP.get(semantic_name, [])
-        for key in possible_keys:
-            if key in data:
-                return data[key]
-        return None
-    
-    @classmethod
-    def load_materials_from_folder(cls, json_folder: str) -> dict:
-        """
-        从JSON文件夹加载所有材质JSON文件
-        
-        参数:
-            json_folder: str, JSON文件夹路径
-            
-        返回:
-            dict, 材质名 -> 纹理数据的字典，结构: {"文件名": {参数名: 路径}}
-        """
-        materials_data = {}
-        
-        if not os.path.exists(json_folder):
-            print(f"JSON文件夹不存在: {json_folder}")
-            return materials_data
-        
-        # 遍历文件夹中的所有json文件
-        for filename in os.listdir(json_folder):
-            if filename.endswith(".json"):
-                mat_name = filename[:-5]  # 去掉 .json 后缀
-                json_path = os.path.join(json_folder, filename)
-                try:
-                    reader = cls(json_path)
-                    mat_data = reader.read_json()
-                    
-                    # 确保返回结构是 {"文件名": {参数名: 路径}}
-                    if isinstance(mat_data, dict):
-                        # 如果是字典，直接使用
-                        materials_data[mat_name] = mat_data
-                    elif isinstance(mat_data, str):
-                        # 如果是字符串（可能是路径），包装成字典
-                        materials_data[mat_name] = {"path": mat_data}
-                    else:
-                        # 其他类型，记录错误
-                        materials_data[mat_name] = {}
-                        print(f"警告: {filename} 内容格式不支持")
-                        
-                except Exception as e:
-                    print(f"读取JSON文件失败 {filename}: {e}")
-        
-        return materials_data
-
-
-# ============================================
-# 材质创建器类 - 负责创建材质球和纹理节点
-# ============================================
-class HYC_MaterialCreator:
-    """材质球创建器"""
-    
-    def __init__(self, props):
-        self.props = props
-        self.nodes = None
-        self.links = None
-        self.matNode = None
-        self.albedoNode = None
-    
-    def create_materials_node(self, matName: str):
-        """创建或获取材质，并初始化节点树"""
-        mat = bpy.data.materials.get(matName)
-        if not mat:
-            mat = bpy.data.materials.new(name=matName)
-        mat.use_nodes = True
-
-        self.nodes = mat.node_tree.nodes
-        self.links = mat.node_tree.links
-        self.matNode = self.nodes["Principled BSDF"]
-    
-    def create_textures_node(self, texName: str, image) -> bpy.types.ShaderNodeTexImage:
-        """创建或获取纹理节点"""
-        if texName in self.nodes:
-            texNode = self.nodes[texName]
-        else:
-            texNode = self.nodes.new(type="ShaderNodeTexImage")
-
-        texNode.name = texName
-        texNode.label = texName
-        texNode.image = image
-        return texNode
-    
-    def create_image(self, imgPath: str, sRGB: bool = True) -> tuple:
-        """创建或获取图像对象"""
-        imgName = Path(imgPath).stem
-        image = bpy.data.images.get(imgName)
-        if not image and os.path.exists(imgPath):
-            image = bpy.data.images.load(imgPath)
-        if sRGB is False and image:
-            image.colorspace_settings.name = "Non-Color"
-        if image:
-            image.alpha_mode = "CHANNEL_PACKED"
-        return image, imgName
-    
-    def create_albedo(self, albedoImgPath: str):
-        """创建Albedo纹理节点"""
-        albedo, albedoName = self.create_image(albedoImgPath)
-        self.albedoNode = self.create_textures_node("Albedo", albedo)
-        self.links.new(self.albedoNode.outputs["Alpha"], self.matNode.inputs["Alpha"])
-        if self.props.occlusion_channel == "0":
-            self.links.new(
-                self.albedoNode.outputs["Color"], self.matNode.inputs["Base Color"]
-            )
-    
-    def create_mask(self, maskImgPath: str):
-        """创建Mask纹理节点"""
-        mask, maskName = self.create_image(maskImgPath, False)
-        maskNode = self.create_textures_node("Mask", mask)
-        
-        if "splitMask" in self.nodes:
-            maskMapNode = self.nodes["splitMask"]
-        else:
-            maskMapNode = self.nodes.new(type="ShaderNodeSeparateColor")
-            maskMapNode.name = "splitMask"
-        
-        self.links.new(maskNode.outputs["Color"], maskMapNode.inputs["Color"])
-
-        if self.props.rough_channel != "0":
-            self.links.new(
-                maskMapNode.outputs[self.props.rough_channel],
-                self.matNode.inputs["Roughness"],
-            )
-        if self.props.metal_channel != "0":
-            self.links.new(
-                maskMapNode.outputs[self.props.metal_channel],
-                self.matNode.inputs["Metallic"],
-            )
-        if self.props.occlusion_channel != "0":
-            if "blend" in self.nodes:
-                blendNode = self.nodes["blend"]
-            else:
-                blendNode = self.nodes.new("ShaderNodeMixRGB")
-                blendNode.name = "blend"
-            self.links.new(
-                maskMapNode.outputs[self.props.occlusion_channel], blendNode.inputs[1]
-            )
-            self.links.new(self.albedoNode.outputs["Color"], blendNode.inputs[2])
-            blendNode.blend_type = "MULTIPLY"
-            blendNode.inputs[0].default_value = 1
-            self.links.new(
-                blendNode.outputs["Color"], self.matNode.inputs["Base Color"]
-            )
-    
-    def create_normal(self, normalImgPath: str):
-        """创建Normal纹理节点"""
-        normal, normalName = self.create_image(normalImgPath, False)
-        normalNode = self.create_textures_node("Normal", normal)
-        
-        if "Normalmap" in self.nodes:
-            normalMapNode = self.nodes["Normalmap"]
-        else:
-            normalMapNode = self.nodes.new(type="ShaderNodeNormalMap")
-            normalMapNode.name = "Normalmap"
-        
-        self.links.new(normalNode.outputs["Color"], normalMapNode.inputs["Color"])
-        self.links.new(normalMapNode.outputs["Normal"], self.matNode.inputs["Normal"])
-        if self.props.directX:
-            normalMapNode.convention = "DIRECTX"
+from .utils.json_reader import HYC_JsonReader
+from .utils.material_creator import HYC_MaterialCreator
 
 
 # ============================================
@@ -819,4 +559,106 @@ class HYC_OT_BakeGrassPivotUV(bpy.types.Operator):
 
         self.report({"INFO"}, "草叶轴心UV烘焙完成！")
         print("\n>>> 全部烘焙结束")
+        return {"FINISHED"}
+
+
+class HYC_OT_AutoImportJson(bpy.types.Operator):
+    """自动查找workspaceDir/JSON文件夹中与场景材质同名的json文件并导入"""
+
+    bl_idname = "hyc.auto_import_json_op"
+    bl_label = "自动导入JSON材质"
+    bl_options = {"REGISTER", "UNDO"}
+
+    # 用于存储未找到的材质名称（供外部访问）
+    missing_materials: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})  # type: ignore
+
+    def execute(self, context):
+        scene = context.scene
+        props = scene.hyc_props
+
+        # 检查工作目录是否设置
+        if not props.workspaceDir:
+            self.report({"WARNING"}, "请先设置工作目录，或拖拽json文件到场景中")
+            return {"CANCELLED"}
+
+        # 构建JSON文件夹路径
+        json_folder = os.path.join(props.workspaceDir, "JSON")
+        if not os.path.exists(json_folder):
+            self.report({"WARNING"}, f"JSON文件夹不存在: {json_folder}")
+            return {"CANCELLED"}
+
+        # 获取场景中所有材质名称
+        scene_materials = set(mat.name for mat in bpy.data.materials)
+        if not scene_materials:
+            self.report({"WARNING"}, "场景中没有材质")
+            return {"CANCELLED"}
+
+        # 扫描JSON文件夹中的所有json文件
+        json_files = {}
+        for filename in os.listdir(json_folder):
+            if filename.endswith(".json"):
+                mat_name = filename[:-5]  # 去掉 .json 后缀
+                json_files[mat_name] = os.path.join(json_folder, filename)
+
+        # 找到匹配的材质
+        matched_materials = scene_materials & json_files.keys()
+        # 找到不匹配的材质（场景中有但JSON文件夹中没有）
+        missing_materials = scene_materials - json_files.keys()
+
+        # 记录未找到的材质
+        self.missing_materials = ", ".join(sorted(missing_materials))
+
+        if not matched_materials:
+            self.report({"INFO"}, f"未找到匹配的JSON文件。场景中有 {len(scene_materials)} 个材质")
+            if missing_materials:
+                self.report({"WARNING"}, f"未找到的材质: {self.missing_materials}")
+            return {"FINISHED"}
+
+        # 读取并创建匹配的材质
+        mat_creator = HYC_MaterialCreator(props)
+        success_count = 0
+
+        for mat_name in sorted(matched_materials):
+            json_path = json_files[mat_name]
+            try:
+                # 读取JSON文件
+                json_reader = HYC_JsonReader(json_path)
+                textures = json_reader.read_json()
+
+                # 验证纹理
+                warnings = json_reader.validate_textures(textures, mat_name)
+                for warning in warnings:
+                    self.report({"WARNING"}, warning)
+
+                # 创建材质节点
+                mat_creator.create_materials_node(mat_name)
+
+                # 创建纹理
+                albedo_path = HYC_JsonReader.get_value_by_semantic(textures, "Albedo")
+                normal_path = HYC_JsonReader.get_value_by_semantic(textures, "Normal")
+                mask_path = HYC_JsonReader.get_value_by_semantic(textures, "Mask")
+
+                has_texture = False
+                if albedo_path:
+                    mat_creator.create_albedo(albedo_path)
+                    has_texture = True
+                if normal_path:
+                    mat_creator.create_normal(normal_path)
+                    has_texture = True
+                if mask_path:
+                    mat_creator.create_mask(mask_path)
+                    has_texture = True
+
+                if has_texture:
+                    success_count += 1
+                    print(f"成功导入材质: {mat_name}")
+
+            except Exception as e:
+                self.report({"WARNING"}, f"导入材质 {mat_name} 失败: {e}")
+
+        # 输出结果
+        self.report({"INFO"}, f"成功导入 {success_count} 个材质")
+        if missing_materials:
+            self.report({"INFO"}, f"未找到JSON文件的材质: {self.missing_materials}")
+
         return {"FINISHED"}
