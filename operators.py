@@ -3,6 +3,7 @@ import os
 
 from .utils.json_reader import HYC_JsonReader
 from .utils.material_creator import HYC_MaterialCreator
+from .preferences import get_preferences
 
 
 # ============================================
@@ -38,6 +39,7 @@ class HYC_DragDrop_Json(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
+        addon_prefs = get_preferences()
         
         # 打印拖放的文件信息
         print("\n=== 拖放文件信息 ===")
@@ -51,8 +53,8 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         print("===================")
         
         # 设置默认工作目录
-        if not props.workspaceDir:
-            props.workspaceDir = os.path.dirname(bpy.data.filepath)
+        if not addon_prefs.workspaceDir:
+            addon_prefs.workspaceDir = os.path.dirname(bpy.data.filepath)
         
         json_data = {}
         
@@ -89,12 +91,12 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         else:
             if bpy.data.filepath:
                 # 优先从JSON文件夹读取
-                json_folder = os.path.join(props.workspaceDir, 'JSON')
+                json_folder = os.path.join(addon_prefs.workspaceDir, 'JSON')
                 if os.path.exists(json_folder):
                     json_data = HYC_JsonReader.load_materials_from_folder(json_folder)
                 else:
                     # 兼容旧格式：从Tex文件夹读取
-                    json_path = os.path.join(props.workspaceDir, 'Tex', 
+                    json_path = os.path.join(addon_prefs.workspaceDir, 'Tex', 
                                             os.path.basename(bpy.data.filepath).replace(".blend", ".json"))
                     if os.path.exists(json_path):
                         json_data = self.load_single_json(json_path)
@@ -161,46 +163,40 @@ class HYC_Create_LOD(bpy.types.Operator):
     def poll(cls, context: bpy.types.Context) -> bool:
         return context.area.type == "VIEW_3D"
 
-    def move_to_first_collection(self, obj):
-        """将物体移动到场景的第一个集合"""
+    def _move_to_first_collection(self, obj: bpy.types.Object) -> None:
+        """将物体移动到场景的第一个集合（如果存在集合）"""
         if bpy.data.collections:
             first_collection = bpy.data.collections[0]
-            # 从当前所有集合中移除
             for coll in obj.users_collection:
                 coll.objects.unlink(obj)
-            # 添加到第一个集合
             first_collection.objects.link(obj)
 
-    def create_empty(self, name: str) -> bpy.types.Object:
-        """创建空物体并设置属性
+    def _get_or_create_empty(self, name: str, fbx_type: str = "LodGroup") -> bpy.types.Object:
+        """获取或创建空物体并设置属性
 
-        如果场景中已存在同名物体则直接使用，不存在则创建新的空物体
-        确保物体有 fbx_type 属性
+        Args:
+            name: 空物体名称
+            fbx_type: fbx_type 属性值，默认为 "LodGroup"
+
+        Returns:
+            空物体对象
         """
-        # 检查场景中是否已存在同名物体
         existing_obj = bpy.data.objects.get(name)
 
         if existing_obj:
-            # 如果存在，检查是否有fbx_type属性，没有则添加
             if "fbx_type" not in existing_obj:
-                existing_obj["fbx_type"] = "LodGroup"
-            # 移动到第一个集合
-            self.move_to_first_collection(existing_obj)
+                existing_obj["fbx_type"] = fbx_type
+            self._move_to_first_collection(existing_obj)
             return existing_obj
 
-        # 不存在则创建新的空物体
-        bpy.ops.object.empty_add(
-            type="PLAIN_AXES",  # 纯轴显示
-            location=(0, 0, 0),  # 位置设为原点，可按需修改
-        )
+        bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
         empty_obj = bpy.context.active_object
-        empty_obj["fbx_type"] = "LodGroup"
+        empty_obj["fbx_type"] = fbx_type
         empty_obj.name = name
-        # 移动到第一个集合
-        self.move_to_first_collection(empty_obj)
+        self._move_to_first_collection(empty_obj)
         return empty_obj
 
-    def extract_base_name(self, obj_name: str) -> str:
+    def _extract_base_name(self, obj_name: str) -> str:
         """从物体名称中提取基础名称
 
         支持的模式：
@@ -223,87 +219,81 @@ class HYC_Create_LOD(bpy.types.Operator):
 
         return obj_name
 
-    def create_parent_set(
-        self, parent_obj: bpy.types.Object, lod_name: str, match_pattern: str
-    ) -> int:
-        """将场景中匹配模式的物体设置为父级的子级
+    def _find_matching_objects(self, base_name: str, match_pattern: str) -> list:
+        """查找场景中匹配模式的物体
 
         Args:
-            parent_obj: 父级物体
-            lod_name: LOD名称前缀
+            base_name: 基础名称
             match_pattern: 匹配模式（"LOD" 或 "UCX"）
 
         Returns:
-            关联的物体数量
+            匹配的物体列表
         """
-        child_objects = []
+        import re
+        matched_objects = []
+
         for obj in bpy.context.scene.objects:
-            # 排除空物体和相机、灯光等非网格物体
             if obj.type != "MESH":
                 continue
 
             if match_pattern == "LOD":
-                # 匹配 name_LOD0, name_LOD1, ... 模式
-                if obj.name.startswith(lod_name + "_LOD"):
-                    suffix = obj.name[len(lod_name) + 4 :]
-                    if suffix.isdigit():
-                        child_objects.append(obj)
+                pattern = re.compile(rf"^{re.escape(base_name)}_LOD\d+$")
+                if pattern.match(obj.name):
+                    matched_objects.append(obj)
             elif match_pattern == "UCX":
-                # 匹配 UCX_name_LOD0_01, UCX_name_LOD1_02, ... 模式
-                ucx_prefix = "UCX_" + lod_name + "_LOD"
-                if obj.name.startswith(ucx_prefix):
-                    # 提取 LOD 后的部分
-                    remaining = obj.name[len(ucx_prefix) :]
-                    # 格式应该是数字_数字，如 "0_01"
-                    if "_" in remaining:
-                        parts = remaining.split("_", 1)
-                        if parts[0].isdigit() and parts[1].isdigit():
-                            child_objects.append(obj)
+                # 匹配以 UCX_(base_name)_LOD0 开头的任意对象，后缀不限
+                pattern = re.compile(rf"^UCX_{re.escape(base_name)}_LOD0")
+                if pattern.match(obj.name):
+                    matched_objects.append(obj)
 
+        return matched_objects
+
+    def _link_objects_to_parent(self, parent_obj: bpy.types.Object, child_objects: list) -> int:
+        """将子物体链接到父物体
+
+        Args:
+            parent_obj: 父级物体
+            child_objects: 子物体列表
+
+        Returns:
+            成功链接的物体数量
+        """
         for obj in child_objects:
             obj.parent = parent_obj
             obj.matrix_parent_inverse = parent_obj.matrix_world.inverted()
 
         return len(child_objects)
 
-    def execute(self, context):
-        # 获取用户选择的物体
+    def execute(self, context: bpy.types.Context):
+        """执行LOD层级结构创建"""
         selected_objects = context.selected_objects
 
         if not selected_objects:
             self.report({"WARNING"}, "请先选择物体")
             return {"CANCELLED"}
 
-        # 从选中物体中提取基础名称
-        base_names = set()
-        for obj in selected_objects:
-            base_name = self.extract_base_name(obj.name)
-            base_names.add(base_name)
+        # 使用集合推导式提取基础名称
+        base_names = {self._extract_base_name(obj.name) for obj in selected_objects}
 
         total_count = 0
         for base_name in base_names:
             # 创建 name 空物体（最顶层父级）
-            main_empty = bpy.data.objects.get(base_name)
-            if not main_empty:
-                bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
-                main_empty = bpy.context.active_object
-                main_empty.name = base_name
-            # 为最顶层空物体添加自定义属性 fbx_type = Transform
-            main_empty["fbx_type"] = "Transform"
-            # 移动到第一个集合
-            self.move_to_first_collection(main_empty)
+            main_empty = self._get_or_create_empty(base_name, fbx_type="Transform")
 
-            # 创建 name_LOD 空物体（带 fbx_type 属性）
-            lod_empty = self.create_empty(base_name + "_LOD")
-            # 将 name_LOD 设置为 name 的子级
+            # 创建 name_LOD 空物体
+            lod_empty = self._get_or_create_empty(base_name + "_LOD", fbx_type="LodGroup")
+
+            # 设置父子关系
             lod_empty.parent = main_empty
             lod_empty.matrix_parent_inverse = main_empty.matrix_world.inverted()
 
-            # 将 LOD 物体关联到 name_LOD
-            lod_count = self.create_parent_set(lod_empty, base_name, "LOD")
+            # 查找并关联 LOD 物体
+            lod_objects = self._find_matching_objects(base_name, "LOD")
+            lod_count = self._link_objects_to_parent(lod_empty, lod_objects)
 
-            # 将 UCX 物体关联到 name
-            ucx_count = self.create_parent_set(main_empty, base_name, "UCX")
+            # 查找并关联 UCX 碰撞物体
+            ucx_objects = self._find_matching_objects(base_name, "UCX")
+            ucx_count = self._link_objects_to_parent(main_empty, ucx_objects)
 
             total_count += lod_count + ucx_count
 
@@ -447,6 +437,7 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
+        addon_prefs = get_preferences()
         # 获取选中的物体
         selected_objects = context.selected_objects
         if not selected_objects:
@@ -458,7 +449,7 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
             self.report({"WARNING"}, "请至少选择一个空物体")
             return {"CANCELLED"}
         # 获取工作目录
-        workspace_dir = props.workspaceDir
+        workspace_dir = addon_prefs.workspaceDir
         if not workspace_dir:
             self.report({"WARNING"}, "请先设置工作目录")
             return {"CANCELLED"}
@@ -575,14 +566,15 @@ class HYC_OT_AutoImportJson(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
+        addon_prefs = get_preferences()
 
         # 检查工作目录是否设置
-        if not props.workspaceDir:
+        if not addon_prefs.workspaceDir:
             self.report({"WARNING"}, "请先设置工作目录，或拖拽json文件到场景中")
             return {"CANCELLED"}
 
         # 构建JSON文件夹路径
-        json_folder = os.path.join(props.workspaceDir, "JSON")
+        json_folder = os.path.join(addon_prefs.workspaceDir, "JSON")
         if not os.path.exists(json_folder):
             self.report({"WARNING"}, f"JSON文件夹不存在: {json_folder}")
             return {"CANCELLED"}

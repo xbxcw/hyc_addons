@@ -41,9 +41,3 @@ class HYC_Properties(bpy.types.PropertyGroup):
         default=True,
         description="是否使用DirectX渲染",
     )  # type: ignore
-    workspaceDir: bpy.props.StringProperty(
-        name="workspaceDir",
-        default="",
-        subtype="DIR_PATH",  # 显示为目录选择窗口
-        description="选择工作目录",
-    )  # type: ignore

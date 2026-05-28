@@ -1,15 +1,6 @@
 import bpy
 from . import operators
-
-# class BasePanel(object):
-#     bl_space_type = "VIEW_3D"
-#     bl_region_type = "UI"
-#     bl_category = "ExampleAddon"
-
-#     @classmethod
-#     def poll(cls, context: bpy.types.Context):
-#         return True
-
+from .preferences import get_preferences
 class HYC_PT_panel(bpy.types.Panel):
     bl_idname = 'HYC_PT_panel'
     bl_label = "简单面板"
@@ -33,7 +24,8 @@ class HYC_PT_panel(bpy.types.Panel):
         row.operator(operators.HYC_OT_AutoImportJson.bl_idname, text="", icon='IMPORT')
         
         row = layout.row()
-        row.prop(hyc_props, "workspaceDir", text="Workspace")
+        addon_prefs = get_preferences()
+        row.prop(addon_prefs, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
         row.operator(operators.HYC_OT_ExportFBX.bl_idname)
