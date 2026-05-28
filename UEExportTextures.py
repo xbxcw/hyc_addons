@@ -24,9 +24,7 @@ def parse_arguments():
     return args
 
 
-# params = parse_arguments()
-# target_path = params.get('p')
-# target_path = r(target_path)
+params = parse_arguments()
 
 # 全局存储已导出的贴图，避免重复导出
 exported_textures = {}
@@ -36,8 +34,12 @@ material_data_dict = {}
 
 # ====================== 配置项 ======================
 
+export_folder = r"E:\work\SM_SefirahCastle_Chair003"  # 导出目录
 
-export_folder = r"C:\Users\Administrator\Desktop\temp"  # 导出目录
+# 如果命令行传入了路径参数，则使用该路径
+target_path = params.get('p')
+if target_path:
+    export_folder = r(target_path)
 
 
 fbxDir = os.path.join(export_folder, "original")
