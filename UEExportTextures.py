@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import subprocess
 import unreal
 
 
@@ -178,7 +179,7 @@ def process_static_mesh(mesh):
     print(f"开始处理模型：{mesh_name}")
 
     # 导出模型本身
-    export_static_mesh_to_fbx(mesh, fbxDir)
+    fbx_path = export_static_mesh_to_fbx(mesh, fbxDir)
 
     # 每个模型独立的JSON数据结构：材质名 → 参数名:路径
     current_model_data = {}
@@ -234,6 +235,7 @@ def process_static_mesh(mesh):
                 continue
 
     print(f"└─ 模型 {mesh_name} 处理完成")
+    return fbx_path
 
 
 def save_material_json():
@@ -259,6 +261,23 @@ def save_material_json():
         print(f"✅ 材质 {mat_name} JSON 已保存：{json_file_path}")
 
 
+def open_folder_and_select_file(file_path):
+    """打开文件夹并选中指定文件（支持Windows）"""
+    if not os.path.exists(file_path):
+        print(f"⚠️ 文件不存在: {file_path}")
+        return
+    
+    try:
+        # 转换为 Windows 格式路径（反斜杠）
+        win_path = os.path.normpath(file_path).replace('/', '\\')
+        # Windows 下使用 start 命令启动 explorer.exe，避免进程残留和资源警告
+        subprocess.run(f'start explorer.exe /select,"{win_path}"', shell=True, 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"✅ 已打开文件夹并选中: {win_path}")
+    except Exception as e:
+        print(f"❌ 打开文件夹失败: {e}")
+
+
 def main():
     """主函数：处理所有选中的静态网格体"""
     # 获取内容浏览器选中的静态网格体
@@ -269,15 +288,24 @@ def main():
         print("请在内容浏览器中选择静态网格体！")
         return
     
+    # 存储导出的FBX文件路径，用于后续打开文件夹
+    exported_fbx_files = []
+    
     # 遍历每个模型，收集材质数据
     for mesh in static_meshes:
-        process_static_mesh(mesh)
+        fbx_path = process_static_mesh(mesh)
+        if fbx_path:
+            exported_fbx_files.append(fbx_path)
 
     # 按材质名生成JSON文件
     save_material_json()
 
     print("\n========================================")
     print("所有模型处理完成！")
+    
+    # 导出完成后，打开第一个FBX文件所在的文件夹并选中该文件
+    if exported_fbx_files:
+        open_folder_and_select_file(exported_fbx_files[0])
 
 
 if __name__ == "__main__":
