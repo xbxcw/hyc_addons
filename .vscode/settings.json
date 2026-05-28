@@ -5,7 +5,5 @@
             "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
-    ],
-
-    "files.autoSave": "onFocusChange",
+    ]
 }
