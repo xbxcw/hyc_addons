@@ -1,16 +1,17 @@
 {
     "folders": [
         {
-            "name": "Blender",
+            "name": "hyc_blender",
             "path": ".."
         },
         {
-            "name": "Marmoset Toolbag",
-            "path": "../../hyc_marmosetToolbag_python_wt"
+            "path": "../../hyc_marmoset"
         },
         {
-            "name": "UE",
-            "path": "../../hyc_ue_python_wt"
+            "path": "../../hyc_sd"
+        },
+        {
+            "path": "../../hyc_ue"
         }
     ],
     "settings": {
