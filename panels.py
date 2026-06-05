@@ -29,7 +29,11 @@ class HYC_PT_panel(bpy.types.Panel):
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
         row.operator(operators.HYC_OT_ExportFBX.bl_idname)
+        row = layout.row()
+        row.operator(operators.HYC_OT_ToggleDrawHelloWorld.bl_idname)
+
         layout.separator()
+
 
         layout.label(text='fengdong')
         row =layout.row()

@@ -3,6 +3,7 @@ import os
 
 from .utils.json_reader import HYC_JsonReader
 from .utils.material_creator import HYC_MaterialCreator
+from .utils.draw_handlers import HYC_DrawHelloWorld
 from .preferences import get_preferences
 
 
@@ -654,3 +655,47 @@ class HYC_OT_AutoImportJson(bpy.types.Operator):
             self.report({"INFO"}, f"未找到JSON文件的材质: {self.missing_materials}")
 
         return {"FINISHED"}
+
+
+# # ============================================
+# 操作符类 - 控制绘制功能
+# ============================================
+class HYC_OT_ToggleDrawHelloWorld(bpy.types.Operator):
+    """切换 hello world 绘制显示"""
+    
+    bl_idname = "hyc.toggle_draw_hello_world"
+    bl_label = "切换 Hello World 显示"
+    bl_options = {"REGISTER", "UNDO"}
+    
+    # 类属性存储绘制实例（使用下划线表示内部属性）
+    _draw_instance = None
+    
+    @classmethod
+    def is_active(cls):
+        """检查当前是否处于激活状态"""
+        return cls._draw_instance is not None
+    
+    def execute(self, context):
+        cls = HYC_OT_ToggleDrawHelloWorld
+        
+        if cls._draw_instance is None:
+            try:
+                # 创建实例并注册
+                cls._draw_instance = HYC_DrawHelloWorld()
+                cls._draw_instance.register()
+                self.report({"INFO"}, "已启用 Hello World 显示")
+            except RuntimeError as e:
+                self.report({"ERROR"}, f"启用失败: {str(e)}")
+                return {"CANCELLED"}
+        else:
+            # 注销并删除实例
+            cls._draw_instance.unregister()
+            cls._draw_instance = None
+            self.report({"INFO"}, "已禁用 Hello World 显示")
+        
+        return {"FINISHED"}
+    
+    @classmethod
+    def poll(cls, context):
+        # 只在3D视图中可用
+        return context.space_data.type == 'VIEW_3D'
