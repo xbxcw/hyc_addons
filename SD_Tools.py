@@ -127,7 +127,6 @@ class MainWindow(QMainWindow):
             error_label = QLabel(f'<span style="color: red;">模块导入失败: {IMPORT_ERROR}</span>')
             error_label.setAlignment(Qt.AlignCenter)
             main_layout.addWidget(error_label)
-            return
 
         sd_group = QGroupBox('SD安装目录')
         sd_layout = QHBoxLayout()
@@ -226,7 +225,10 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.result_text)
         main_layout.addWidget(result_group)
 
-        self.log('初始化完成，准备获取SBSAR参数...')
+        if IMPORT_SUCCESS:
+            self.log('初始化完成，准备获取SBSAR参数...')
+        else:
+            self.log(f'初始化完成，但模块导入失败: {IMPORT_ERROR}')
 
     def browse_sd_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, '选择SD安装目录')
@@ -269,6 +271,10 @@ class MainWindow(QMainWindow):
         self.log_text.append(f'[{timestamp}] {message}')
 
     def on_run(self):
+        if not IMPORT_SUCCESS:
+            self.log(f'错误: 模块导入失败，无法运行: {IMPORT_ERROR}')
+            return
+
         sd_dir = self.sd_dir_input.text().strip()
         sbsar_file = self.sbsar_input.text().strip()
         
