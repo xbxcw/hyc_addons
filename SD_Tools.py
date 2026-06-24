@@ -372,6 +372,8 @@ class MainWindow(QMainWindow):
                 for param_name in self.image_params:
                     if filename.endswith(f'_{param_name}.tga') or filename.endswith(f'_{param_name}.png') or filename.endswith(f'_{param_name}.jpg'):
                         base_name = filename.rsplit(f'_{param_name}', 1)[0]
+                        if not base_name.startswith('T_'):
+                            continue
                         full_path = os.path.join(root, filename)
                         relative_path = os.path.relpath(root, input_folder)
                         self.matched_files.append({
