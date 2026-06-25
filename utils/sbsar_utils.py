@@ -46,6 +46,8 @@ def _parse_json_output(output):
                 'type': param.get('type', param.get('usagetype', '')),
                 'default': str(param.get('default', param.get('defaultValue', '')))
             })
+    if not params:
+        raise ValueError('未找到任何暴露的参数')
     return params
 
 
@@ -53,35 +55,24 @@ def _parse_text_output(output):
     params = []
     lines = output.split('\n')
     pattern = re.compile(
-        r'[-*]\s*'
-        r'(?P<name>[\w]+)'
-        r'\s*[\(:]\s*'
-        r'(?P<type>[\w]+)'
-        r'[\):]?\s*'
-        r'(?P<default>.*?)$'
+        r'^\s*INPUT\s+'
+        r'(?P<name>\$?\w+)'
+        r'\s+'
+        r'(?P<type>\w+)'
     )
 
     for line in lines:
-        line = line.strip()
         match = pattern.search(line)
         if match:
+            name = match.group('name')
             params.append({
-                'name': match.group('name'),
+                'name': name,
                 'type': match.group('type'),
-                'default': match.group('default').strip().rstrip(',')
+                'default': ''
             })
 
     if not params:
-        pattern2 = re.compile(r'^\s*(?P<name>\w+)\s*:\s*(?P<type>\w+)', re.IGNORECASE)
-        for line in lines:
-            match = pattern2.search(line)
-            if match:
-                params.append({
-                    'name': match.group('name'),
-                    'type': match.group('type'),
-                    'default': ''
-                })
-
+        raise ValueError('未找到任何暴露的参数')
     return params
 
 

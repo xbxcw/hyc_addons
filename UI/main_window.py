@@ -418,6 +418,7 @@ class MainWindow(QMainWindow):
         self.log('开始使用 sbsrender 渲染贴图...')
         grouped = self._group_matched_by_base()
         success_count = 0
+        export_results = []
 
         for base_name, params in grouped.items():
             self.log(f'处理: {base_name}')
@@ -441,14 +442,27 @@ class MainWindow(QMainWindow):
                     self.log(f'  警告: {result.stderr.strip()}')
                 if result.returncode == 0:
                     success_count += 1
+                    output_path = f'{output_folder}/{base_name}_*.tga'
+                    export_results.append({'base_name': base_name, 'output_path': output_path, 'status': '✓ 成功'})
                     self.log('  ✓ 渲染成功')
                 else:
+                    export_results.append({'base_name': base_name, 'output_path': '', 'status': '✗ 失败'})
                     self.log(f'  ✗ 渲染失败: {result.stderr}')
             except Exception as e:
+                export_results.append({'base_name': base_name, 'output_path': '', 'status': f'✗ {e}'})
                 self.log(f'  ✗ 执行失败: {e}')
 
         total = len(grouped)
         self.log(f'渲染完成，成功 {success_count} 个，失败 {total - success_count} 个')
+
+        export_text = '\n导出结果:\n'
+        export_text += '=' * 60 + '\n'
+        for r in export_results:
+            export_text += f"基础名称: {r['base_name']}  {r['status']}\n"
+            if r['output_path']:
+                export_text += f"  输出路径: {r['output_path']}\n"
+            export_text += '-' * 60 + '\n'
+        self.result_text.append(export_text)
 
     def _group_matched_by_base(self):
         grouped = {}
