@@ -1,1 +1,6 @@
+# Python 编译缓存
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
