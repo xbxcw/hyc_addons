@@ -32,16 +32,40 @@ class ONELINER_OT_execute(bpy.types.Operator):
     )
 
     def execute(self, context):
-        engine.add_history(self.rule)
-        success = engine.execute(
-            self.rule,
-            self.scope_mode,
-            self.use_forced_mode,
-        )
-        if success:
-            self.report({'INFO'}, f"OneLiner: 已执行规则 \"{self.rule}\"")
+        scene = context.scene
+        chain_rules = [e.rule for e in scene.oneLiner_chain_rules]
+
+        if chain_rules:
+            # 链式执行
+            for cr in chain_rules:
+                engine.add_history(cr)
+            if self.rule.strip():
+                engine.add_history(self.rule)
+            success = engine.execute_chain(
+                chain_rules,
+                self.rule,
+                self.scope_mode,
+                self.use_forced_mode,
+            )
+            if success:
+                scene.oneLiner_chain_rules.clear()
+                scene.oneLiner_chain_count = 0
+                scene.oneLiner_rule = ""
+                self.report({'INFO'}, f"OneLiner: 已执行 {len(chain_rules) + 1} 步规则链")
+            else:
+                self.report({'ERROR'}, "OneLiner: 链式执行失败")
         else:
-            self.report({'ERROR'}, "OneLiner: 执行失败")
+            # 单规则执行
+            engine.add_history(self.rule)
+            success = engine.execute(
+                self.rule,
+                self.scope_mode,
+                self.use_forced_mode,
+            )
+            if success:
+                self.report({'INFO'}, f"OneLiner: 已执行规则 \"{self.rule}\"")
+            else:
+                self.report({'ERROR'}, "OneLiner: 执行失败")
         return {'FINISHED'} if success else {'CANCELLED'}
 
     def invoke(self, context, event):

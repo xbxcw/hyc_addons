@@ -596,59 +596,63 @@ def _preview_label_for_target(target: RenameTarget, display_name: str,
 # 构建重命名结果
 # ---------------------------------------------------------------------------
 
+def _apply_rule_to_name(parsed: ParsedRule, index: int, current: str) -> str:
+    """对单个名称应用规则，返回新名称。"""
+    if '>' in parsed.clean_rule:
+        next_name = current
+        pairs = _replacement_pairs(parsed.clean_rule, index)
+        if not pairs:
+            return current
+        for old, new in pairs:
+            next_name = next_name.replace(old, new)
+        return next_name
+    elif parsed.clean_rule.startswith('-'):
+        rule = parsed.clean_rule
+        if rule == '-' or rule == '--':
+            return current
+        try:
+            n = int(rule[1:])
+            if n >= 0:
+                return current[:max(0, len(current) - n)]
+            else:
+                return current[:min(len(current), -n)]
+        except ValueError:
+            return current
+    elif parsed.clean_rule.startswith('+'):
+        if len(parsed.clean_rule) == 1:
+            return current
+        try:
+            n = int(parsed.clean_rule[1:])
+            return current[max(0, n):]
+        except ValueError:
+            return current
+    else:
+        next_name = _apply_sequence_patterns(parsed.clean_rule, index)
+        return next_name.replace('!', current)
+
+
 def _build_renamed_items(parsed: ParsedRule, targets: List[RenameTarget],
-                         reverse_for_rename: bool = True) -> List[str]:
+                         reverse_for_rename: bool = True,
+                         starting_names: Optional[List[str]] = None) -> List[str]:
     """对目标列表应用规则，生成新名称列表。"""
     if parsed.clean_rule == '':
-        return [t.current_name for t in targets]
+        base = starting_names if starting_names else [t.current_name for t in targets]
+        return list(base)
 
     renamed = []
     for i, target in enumerate(targets):
-        current = target.current_name
-        if '>' in parsed.clean_rule:
-            next_name = current
-            pairs = _replacement_pairs(parsed.clean_rule, i)
-            if not pairs:
-                renamed.append(current)
-                continue
-            for old, new in pairs:
-                next_name = next_name.replace(old, new)
-            renamed.append(next_name)
-        elif parsed.clean_rule.startswith('-'):
-            rule = parsed.clean_rule
-            if rule == '-' or rule == '--':
-                renamed.append(current)
-            else:
-                try:
-                    n = int(rule[1:])
-                    if n >= 0:
-                        next_name = current[:max(0, len(current) - n)]
-                    else:
-                        next_name = current[:min(len(current), -n)]
-                    renamed.append(next_name)
-                except ValueError:
-                    renamed.append(current)
-        elif parsed.clean_rule.startswith('+'):
-            if len(parsed.clean_rule) == 1:
-                renamed.append(current)
-            else:
-                try:
-                    n = int(parsed.clean_rule[1:])
-                    renamed.append(current[max(0, n):])
-                except ValueError:
-                    renamed.append(current)
-        else:
-            next_name = _apply_sequence_patterns(parsed.clean_rule, i)
-            next_name = next_name.replace('!', current)
-            renamed.append(next_name)
+        current = starting_names[i] if starting_names else target.current_name
+        renamed.append(_apply_rule_to_name(parsed, i, current))
 
     # 处理 '/'
-    renamed = [current if r == '/' else r for r in renamed]
+    base_check = starting_names if starting_names else [t.current_name for t in targets]
+    renamed = [base_check[i] if r == '/' else r for i, r in enumerate(renamed)]
 
     # 重名处理：如果新名称与场景中已有对象冲突（且不是自身），则追加数字后缀
+    original_names = [t.current_name for t in targets]
     for i in range(len(renamed)):
         r = renamed[i]
-        if r != targets[i].current_name and _name_exists(r):
+        if r != original_names[i] and _name_exists(r):
             renamed[i] = _unique_name(r)
 
     # 层级模式需要反转顺序（从叶子到根）
@@ -689,7 +693,61 @@ def preview(rule: str, forced_mode: str = ScopeMode.SELECTED,
         result.items = renamed
         result.raw_items = raw
 
-    # 构建 PreviewItem 列表
+    _fill_preview_items(result, targets)
+    return result
+
+
+def preview_chain(chain_rules: List[str], current_rule: str,
+                  forced_mode: str = ScopeMode.SELECTED,
+                  use_forced_mode: bool = False) -> PreviewResult:
+    """链式预览：先应用链中所有规则，再应用当前输入规则。"""
+    parsed = parse_rule(current_rule, forced_mode, use_forced_mode)
+    result = PreviewResult()
+    result.selection_only = parsed.selection_only
+
+    if parsed.selection_only:
+        targets = _collect_wildcard(parsed.wildcard_pattern)
+        names = [t.current_name for t in targets]
+        raw = list(names)
+        _sort_preview_entries(targets, names, raw)
+        result.items = names
+        result.raw_items = raw
+        _fill_preview_items(result, targets)
+        return result
+
+    targets = _collect_targets_for_parsed(parsed)
+    if not targets:
+        return result
+
+    # 从原始名称开始，依次应用链中每条规则
+    virtual_names = [t.current_name for t in targets]
+    for chain_rule in chain_rules:
+        chain_parsed = parse_rule(chain_rule, forced_mode, use_forced_mode)
+        if chain_parsed.clean_rule:
+            virtual_names = _build_renamed_items(
+                chain_parsed, targets, reverse_for_rename=False,
+                starting_names=virtual_names,
+            )
+
+    # 应用当前输入规则
+    if parsed.clean_rule:
+        renamed = _build_renamed_items(
+            parsed, targets, reverse_for_rename=False,
+            starting_names=virtual_names,
+        )
+    else:
+        renamed = list(virtual_names)
+
+    raw = list(renamed)
+    _sort_preview_entries(targets, renamed, raw)
+    result.items = renamed
+    result.raw_items = raw
+    _fill_preview_items(result, targets)
+    return result
+
+
+def _fill_preview_items(result: PreviewResult, targets: List[RenameTarget]):
+    """填充 PreviewResult 的 preview_items 列表。"""
     base_depth = min((_dag_depth(t.path) for t in targets if t.is_hierarchy), default=0)
     result.preview_items = []
     for i, name in enumerate(result.items):
@@ -704,8 +762,6 @@ def preview(rule: str, forced_mode: str = ScopeMode.SELECTED,
             parent_path=parent_path,
             is_hierarchy=t.is_hierarchy,
         ))
-
-    return result
 
 
 def build_execute_plan(rule: str, forced_mode: str = ScopeMode.SELECTED,
@@ -773,6 +829,54 @@ def execute(rule: str, forced_mode: str = ScopeMode.SELECTED,
             op.obj.name = op.new_name
         except Exception:
             return False
+    return True
+
+
+def execute_chain(chain_rules: List[str], current_rule: str,
+                  forced_mode: str = ScopeMode.SELECTED,
+                  use_forced_mode: bool = False) -> bool:
+    """链式执行：依次应用链中所有规则和当前规则，最终重命名。"""
+    if not chain_rules and not current_rule.strip():
+        return True
+
+    parsed = parse_rule(current_rule, forced_mode, use_forced_mode)
+
+    if parsed.selection_only:
+        return execute(current_rule, forced_mode, use_forced_mode)
+
+    targets = _collect_targets_for_parsed(parsed)
+    if not targets:
+        return True
+
+    # 从原始名称开始，依次应用链中每条规则
+    virtual_names = [t.current_name for t in targets]
+    for chain_rule in chain_rules:
+        chain_parsed = parse_rule(chain_rule, forced_mode, use_forced_mode)
+        if chain_parsed.clean_rule:
+            virtual_names = _build_renamed_items(
+                chain_parsed, targets, reverse_for_rename=False,
+                starting_names=virtual_names,
+            )
+
+    # 应用当前规则
+    if parsed.clean_rule:
+        final_names = _build_renamed_items(
+            parsed, targets, reverse_for_rename=True,
+            starting_names=virtual_names,
+        )
+    else:
+        final_names = list(virtual_names)
+
+    if len(final_names) != len(targets):
+        return False
+
+    for i, target in enumerate(targets):
+        new_name = final_names[i].strip()
+        if new_name and target.current_name != new_name:
+            try:
+                target.obj.name = new_name
+            except Exception:
+                return False
     return True
 
 

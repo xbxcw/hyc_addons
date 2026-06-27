@@ -4,6 +4,9 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty, CollectionProp
 from bpy.types import Panel, UIList, Operator, Scene, PropertyGroup, Menu
 from . import engine
 
+# 按键映射存储（用于取消注册）
+keymap_items = []
+
 
 # ---------------------------------------------------------------------------
 # 场景属性
@@ -15,6 +18,11 @@ class OneLinerPreviewEntry(PropertyGroup):
     raw_text: StringProperty(name="原始文本")
     type_name: StringProperty(name="类型")
     path: StringProperty(name="路径")
+
+
+class OneLinerChainEntry(PropertyGroup):
+    """链式规则中的每一项。"""
+    rule: StringProperty(name="规则")
 
 
 class OneLinerFavoriteEntry(PropertyGroup):
@@ -36,11 +44,21 @@ def _on_rule_changed(scene, context):
         return
 
     rule = scene.oneLiner_rule
-    result = engine.preview(
-        rule,
-        scene.oneLiner_scope_mode,
-        scene.oneLiner_use_forced_mode,
-    )
+    chain_rules = [e.rule for e in scene.oneLiner_chain_rules]
+
+    if chain_rules:
+        result = engine.preview_chain(
+            chain_rules,
+            rule,
+            scene.oneLiner_scope_mode,
+            scene.oneLiner_use_forced_mode,
+        )
+    else:
+        result = engine.preview(
+            rule,
+            scene.oneLiner_scope_mode,
+            scene.oneLiner_use_forced_mode,
+        )
 
     scene.oneLiner_preview_items.clear()
     for item in result.preview_items:
@@ -60,6 +78,66 @@ class ONELINER_OT_update_preview(Operator):
 
     def execute(self, context):
         _on_rule_changed(context.scene, context)
+        return {'FINISHED'}
+
+
+# ---------------------------------------------------------------------------
+# 链式规则操作
+# ---------------------------------------------------------------------------
+
+class ONELINER_OT_apply_rule(Operator):
+    """将当前规则加入规则链（不重命名）"""
+    bl_idname = "oneliner.apply_rule"
+    bl_label = "加入规则链"
+    bl_description = "将当前规则加入规则链，预览组合效果"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        rule = scene.oneLiner_rule.strip()
+        if not rule:
+            self.report({'WARNING'}, "OneLiner: 请先输入规则")
+            return {'CANCELLED'}
+
+        entry = scene.oneLiner_chain_rules.add()
+        entry.rule = rule
+        scene.oneLiner_chain_count += 1
+        scene.oneLiner_rule = ""
+
+        _on_rule_changed(scene, context)
+        return {'FINISHED'}
+
+
+class ONELINER_OT_remove_chain_rule(Operator):
+    """从规则链中移除指定规则"""
+    bl_idname = "oneliner.remove_chain_rule"
+    bl_label = "移除规则"
+    bl_description = "从规则链中移除该规则"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: IntProperty()
+
+    def execute(self, context):
+        scene = context.scene
+        if 0 <= self.index < len(scene.oneLiner_chain_rules):
+            scene.oneLiner_chain_rules.remove(self.index)
+            scene.oneLiner_chain_count -= 1
+            _on_rule_changed(scene, context)
+        return {'FINISHED'}
+
+
+class ONELINER_OT_clear_chain(Operator):
+    """清空规则链"""
+    bl_idname = "oneliner.clear_chain"
+    bl_label = "清空规则链"
+    bl_description = "清空所有已加入的规则，恢复原始预览"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        scene.oneLiner_chain_rules.clear()
+        scene.oneLiner_chain_count = 0
+        _on_rule_changed(scene, context)
         return {'FINISHED'}
 
 
@@ -158,6 +236,8 @@ class ONELINER_PT_main(Panel):
         row = layout.row(align=True)
         row.prop(scene, "oneLiner_rule", text="")
 
+        # 应用按钮（加入链）
+        op = row.operator("oneliner.apply_rule", text="", icon='FORWARD')
         # 执行按钮
         op = row.operator("oneliner.execute", text="", icon='CHECKMARK')
         op.rule = scene.oneLiner_rule
@@ -171,6 +251,19 @@ class ONELINER_PT_main(Panel):
         row = layout.row(align=True)
         row.prop(scene, "oneLiner_scope_mode", text="")
         row.prop(scene, "oneLiner_preview_enabled", text="", icon='HIDE_OFF' if scene.oneLiner_preview_enabled else 'HIDE_ON')
+
+        # --- 链式规则 ---
+        if scene.oneLiner_chain_count > 0:
+            box = layout.box()
+            row = box.row()
+            row.label(text=f"规则链 ({scene.oneLiner_chain_count} 步)", icon='RENDERLAYERS')
+            row.operator("oneliner.clear_chain", text="", icon='TRASH')
+            col = box.column(align=True)
+            for i, entry in enumerate(scene.oneLiner_chain_rules):
+                row = col.row(align=True)
+                row.label(text=f"  {i + 1}. {entry.rule}")
+                op = row.operator("oneliner.remove_chain_rule", text="", icon='X', emboss=False)
+                op.index = i
 
         # --- 预览列表 ---
         if scene.oneLiner_preview_enabled and scene.oneLiner_preview_count > 0:
@@ -352,8 +445,66 @@ def register():
     Scene.oneLiner_favorites = CollectionProperty(type=OneLinerFavoriteEntry)
     Scene.oneLiner_favorite_count = IntProperty(name="收藏数量", default=0)
 
+    Scene.oneLiner_chain_rules = CollectionProperty(type=OneLinerChainEntry)
+    Scene.oneLiner_chain_count = IntProperty(name="规则链数量", default=0)
+
+    # 按键映射：Enter 键加入规则链
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
+        kmi = km.keymap_items.new(
+            ONELINER_OT_apply_rule.bl_idname,
+            'RET', 'PRESS',
+        )
+        keymap_items.append((km, kmi))
+
+    # 选中变更监控
+    _selection_check_handler()
+
+
+def _selection_check_handler():
+    """定期检查选中状态，变更时清空规则链。"""
+    _prev_selection = set()
+
+    def _check():
+        try:
+            current = set()
+            for obj in bpy.context.selected_objects:
+                current.add(obj.name)
+            if not current and _prev_selection:
+                # 点击空白处，清空规则链
+                scene = bpy.context.scene
+                if scene.oneLiner_chain_count > 0:
+                    scene.oneLiner_chain_rules.clear()
+                    scene.oneLiner_chain_count = 0
+                    scene.oneLiner_rule = ""
+                    _on_rule_changed(scene, bpy.context)
+            elif current and current != _prev_selection and _prev_selection:
+                # 选中变更，清空规则链
+                scene = bpy.context.scene
+                if scene.oneLiner_chain_count > 0:
+                    scene.oneLiner_chain_rules.clear()
+                    scene.oneLiner_chain_count = 0
+                    _on_rule_changed(scene, bpy.context)
+            _prev_selection.clear()
+            _prev_selection.update(current)
+        except Exception:
+            pass
+        return 0.3  # 每 0.3 秒检查一次
+
+    if not bpy.app.timers.is_registered(_check):
+        bpy.app.timers.register(_check, persistent=True)
+
 
 def unregister():
+    # 清理按键映射
+    for km, kmi in keymap_items:
+        km.keymap_items.remove(kmi)
+    keymap_items.clear()
+
+    del Scene.oneLiner_chain_count
+    del Scene.oneLiner_chain_rules
     del Scene.oneLiner_favorite_count
     del Scene.oneLiner_favorites
     del Scene.oneLiner_history_index
