@@ -442,30 +442,48 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
         # 获取选中的物体
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({"WARNING"}, "请先选择空物体")
-            return {"CANCELLED"}
-        # 过滤出所有选中的空物体
-        empty_objects = [obj for obj in selected_objects if obj.type == "EMPTY"]
-        if not empty_objects:
-            self.report({"WARNING"}, "请至少选择一个空物体")
+            self.report({"WARNING"}, "请先选择物体")
             return {"CANCELLED"}
         # 获取工作目录
         workspace_dir = addon_prefs.workspaceDir
         if not workspace_dir:
             self.report({"WARNING"}, "请先设置工作目录")
             return {"CANCELLED"}
-        # 创建FBX输出目录
-        fbx_dir = os.path.join(workspace_dir, "Fbx")
-        os.makedirs(fbx_dir, exist_ok=True)
-        # 批量导出每个空物体
-        export_count = 0
-        for parent_obj in empty_objects:
-            if self.export_single_fbx(parent_obj, fbx_dir):
-                export_count += 1
-        if export_count > 0:
-            self.report({"INFO"}, f"共成功导出 {export_count} 个FBX文件")
+
+        if props.export_mode == "bake":
+            # Bake 模式：导出到 项目文件夹/bake/当前blend文件名/选择模型的名字.fbx
+            blend_name = os.path.splitext(os.path.basename(bpy.data.filepath))[0]
+            if not blend_name:
+                self.report({"WARNING"}, "请先保存 blend 文件")
+                return {"CANCELLED"}
+            fbx_dir = os.path.join(workspace_dir, "bake", blend_name)
+            os.makedirs(fbx_dir, exist_ok=True)
+
+            export_count = 0
+            for obj in selected_objects:
+                if self.export_single_fbx(obj, fbx_dir):
+                    export_count += 1
+            if export_count > 0:
+                self.report({"INFO"}, f"共成功导出 {export_count} 个FBX文件到 bake/{blend_name}/")
+            else:
+                self.report({"WARNING"}, "没有成功导出任何FBX文件")
         else:
-            self.report({"WARNING"}, "没有成功导出任何FBX文件")
+            # UE 模式：原有逻辑，导出到 Fbx 文件夹
+            empty_objects = [obj for obj in selected_objects if obj.type == "EMPTY"]
+            if not empty_objects:
+                self.report({"WARNING"}, "请至少选择一个空物体")
+                return {"CANCELLED"}
+            fbx_dir = os.path.join(workspace_dir, "Fbx")
+            os.makedirs(fbx_dir, exist_ok=True)
+
+            export_count = 0
+            for parent_obj in empty_objects:
+                if self.export_single_fbx(parent_obj, fbx_dir):
+                    export_count += 1
+            if export_count > 0:
+                self.report({"INFO"}, f"共成功导出 {export_count} 个FBX文件")
+            else:
+                self.report({"WARNING"}, "没有成功导出任何FBX文件")
         return {"FINISHED"}
 
 
@@ -699,3 +717,48 @@ class HYC_OT_ToggleDrawHelloWorld(bpy.types.Operator):
     def poll(cls, context):
         # 只在3D视图中可用
         return context.space_data.type == 'VIEW_3D'
+
+
+class HYC_OT_CreateBillboardMaterial(bpy.types.Operator):
+    """创建Billboard材质球"""
+
+    bl_idname = "hyc.create_billboard_material"
+    bl_label = "创建Billboard材质"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        selected_objs = context.selected_objects
+
+        if not selected_objs:
+            self.report({"WARNING"}, "请至少选择一个模型")
+            return {"CANCELLED"}
+
+        for obj in selected_objs:
+            original_name = obj.name
+            parts = original_name.split("_")
+            if len(parts) < 3:
+                self.report(
+                    {"WARNING"},
+                    f"跳过 '{original_name}'：名称格式不符合要求（至少需要三段，如 SM_Holly037_LOD3）",
+                )
+                continue
+
+            core_name = "_".join(parts[1:-1])
+            material_name = f"MI_{core_name}_Billboard"
+
+            mat = bpy.data.materials.get(material_name)
+            if mat:
+                self.report({"INFO"}, f"材质 '{material_name}' 已存在，跳过创建")
+            else:
+                mat = bpy.data.materials.new(name=material_name)
+                mat.use_nodes = True
+                self.report({"INFO"}, f"材质 '{material_name}' 创建成功")
+
+            if obj.type == "MESH":
+                if obj.data.materials:
+                    obj.data.materials[0] = mat
+                else:
+                    obj.data.materials.append(mat)
+
+        self.report({"INFO"}, "Billboard 材质创建完成！")
+        return {"FINISHED"}

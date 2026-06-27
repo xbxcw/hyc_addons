@@ -41,3 +41,12 @@ class HYC_Properties(bpy.types.PropertyGroup):
         default=True,
         description="是否使用DirectX渲染",
     )  # type: ignore
+    export_mode: bpy.props.EnumProperty(
+        name="导出模式",
+        items=(
+            ("ue", "UE", "导出到 Fbx 文件夹"),
+            ("bake", "Bake", "导出到 bake/当前blend文件名/ 文件夹"),
+        ),
+        default="ue",
+        description="选择导出目标文件夹",
+    )  # type: ignore

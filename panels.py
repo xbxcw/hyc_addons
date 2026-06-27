@@ -28,9 +28,11 @@ class HYC_PT_panel(bpy.types.Panel):
         row.prop(addon_prefs, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
+        row.prop(hyc_props, "export_mode")
         row.operator(operators.HYC_OT_ExportFBX.bl_idname)
         row = layout.row()
         row.operator(operators.HYC_OT_ToggleDrawHelloWorld.bl_idname)
+        row.operator(operators.HYC_OT_CreateBillboardMaterial.bl_idname)
 
         layout.separator()
 
