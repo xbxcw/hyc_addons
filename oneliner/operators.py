@@ -32,9 +32,7 @@ class ONELINER_OT_execute(bpy.types.Operator):
     )
 
     def execute(self, context):
-        # 加入历史
         engine.add_history(self.rule)
-        # 执行
         success = engine.execute(
             self.rule,
             self.scope_mode,
@@ -47,7 +45,6 @@ class ONELINER_OT_execute(bpy.types.Operator):
         return {'FINISHED'} if success else {'CANCELLED'}
 
     def invoke(self, context, event):
-        # 从场景属性中获取当前规则
         scene = context.scene
         self.rule = scene.oneLiner_rule
         self.scope_mode = scene.oneLiner_scope_mode

@@ -17,6 +17,13 @@ class OneLinerPreviewEntry(PropertyGroup):
     path: StringProperty(name="路径")
 
 
+class OneLinerFavoriteEntry(PropertyGroup):
+    """收藏列表中每一项的属性。"""
+    rule: StringProperty(name="规则")
+    scope_mode: StringProperty(name="作用域", default="SELECTED")
+    use_forced_mode: BoolProperty(name="强制模式", default=False)
+
+
 # ---------------------------------------------------------------------------
 # 预览更新
 # ---------------------------------------------------------------------------
@@ -199,6 +206,99 @@ class ONELINER_PT_main(Panel):
                 op.rule = h
                 op.scope_mode = scene.oneLiner_scope_mode
                 op.use_forced_mode = scene.oneLiner_use_forced_mode
+                op = row.operator("oneliner.add_favorite", text="", icon='SOLO_ON', emboss=False)
+                op.rule_text = h
+
+        # --- 收藏 ---
+        if scene.oneLiner_favorite_count > 0:
+            box = layout.box()
+            row = box.row()
+            row.label(text=f"收藏 ({scene.oneLiner_favorite_count})", icon='SOLO_ON')
+            row.operator("oneliner.add_favorite", text="", icon='ADD')
+            col = box.column(align=True)
+            for i, entry in enumerate(scene.oneLiner_favorites):
+                row = col.row(align=True)
+                op = row.operator("oneliner.use_favorite", text=entry.rule, emboss=False)
+                op.index = i
+                op = row.operator("oneliner.remove_favorite", text="", icon='X', emboss=False)
+                op.index = i
+        else:
+            box = layout.box()
+            row = box.row()
+            row.label(text="收藏", icon='SOLO_OFF')
+            row.operator("oneliner.add_favorite", text="", icon='ADD')
+
+
+# ---------------------------------------------------------------------------
+# 收藏操作符
+# ---------------------------------------------------------------------------
+
+class ONELINER_OT_add_favorite(Operator):
+    """将当前规则添加到收藏"""
+    bl_idname = "oneliner.add_favorite"
+    bl_label = "添加到收藏"
+    bl_description = "将当前输入的规则添加到收藏列表"
+    bl_options = {'INTERNAL'}
+
+    rule_text: StringProperty(name="规则文本", default="")
+
+    def execute(self, context):
+        scene = context.scene
+        rule = self.rule_text.strip() if self.rule_text.strip() else scene.oneLiner_rule.strip()
+        if not rule:
+            self.report({'WARNING'}, "规则为空，无法收藏")
+            return {'CANCELLED'}
+
+        for entry in scene.oneLiner_favorites:
+            if entry.rule == rule:
+                self.report({'INFO'}, "该规则已在收藏中")
+                return {'FINISHED'}
+
+        entry = scene.oneLiner_favorites.add()
+        entry.rule = rule
+        entry.scope_mode = scene.oneLiner_scope_mode
+        entry.use_forced_mode = scene.oneLiner_use_forced_mode
+        scene.oneLiner_favorite_count = len(scene.oneLiner_favorites)
+        self.report({'INFO'}, f"已收藏规则: {rule}")
+        return {'FINISHED'}
+
+
+class ONELINER_OT_remove_favorite(Operator):
+    """从收藏中移除指定规则"""
+    bl_idname = "oneliner.remove_favorite"
+    bl_label = "移除收藏"
+    bl_description = "从收藏列表中移除此规则"
+    bl_options = {'INTERNAL'}
+
+    index: IntProperty(name="索引", default=-1)
+
+    def execute(self, context):
+        scene = context.scene
+        if 0 <= self.index < len(scene.oneLiner_favorites):
+            scene.oneLiner_favorites.remove(self.index)
+            scene.oneLiner_favorite_count = len(scene.oneLiner_favorites)
+            self.report({'INFO'}, "已移除收藏")
+        return {'FINISHED'}
+
+
+class ONELINER_OT_use_favorite(Operator):
+    """使用收藏的规则"""
+    bl_idname = "oneliner.use_favorite"
+    bl_label = "使用收藏"
+    bl_description = "将收藏的规则填入输入框"
+    bl_options = {'INTERNAL'}
+
+    index: IntProperty(name="索引", default=-1)
+
+    def execute(self, context):
+        scene = context.scene
+        if 0 <= self.index < len(scene.oneLiner_favorites):
+            entry = scene.oneLiner_favorites[self.index]
+            scene.oneLiner_rule = entry.rule
+            scene.oneLiner_scope_mode = entry.scope_mode
+            scene.oneLiner_use_forced_mode = entry.use_forced_mode
+            self.report({'INFO'}, f"已载入收藏: {entry.rule}")
+        return {'FINISHED'}
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +311,7 @@ def register():
         name="规则",
         description="重命名规则",
         default="",
+        options={'TEXTEDIT_UPDATE'},
         update=lambda self, ctx: _on_rule_changed(self, ctx),
     )
     Scene.oneLiner_scope_mode = EnumProperty(
@@ -248,8 +349,13 @@ def register():
     Scene.oneLiner_preview_count = IntProperty(name="预览数量", default=0)
     Scene.oneLiner_history_index = IntProperty(name="历史索引", default=-1)
 
+    Scene.oneLiner_favorites = CollectionProperty(type=OneLinerFavoriteEntry)
+    Scene.oneLiner_favorite_count = IntProperty(name="收藏数量", default=0)
+
 
 def unregister():
+    del Scene.oneLiner_favorite_count
+    del Scene.oneLiner_favorites
     del Scene.oneLiner_history_index
     del Scene.oneLiner_preview_count
     del Scene.oneLiner_preview_items
