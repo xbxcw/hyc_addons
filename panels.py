@@ -1,6 +1,5 @@
 import bpy
 from . import operators
-from .preferences import get_preferences
 class HYC_PT_panel(bpy.types.Panel):
     bl_idname = 'HYC_PT_panel'
     bl_label = "简单面板"
@@ -24,8 +23,7 @@ class HYC_PT_panel(bpy.types.Panel):
         row.operator(operators.HYC_OT_AutoImportJson.bl_idname, text="", icon='IMPORT')
         
         row = layout.row()
-        addon_prefs = get_preferences()
-        row.prop(addon_prefs, "workspaceDir", text="Workspace")
+        row.prop(hyc_props, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
         row.prop(hyc_props, "export_mode")

@@ -50,3 +50,9 @@ class HYC_Properties(bpy.types.PropertyGroup):
         default="ue",
         description="选择导出目标文件夹",
     )  # type: ignore
+    workspaceDir: bpy.props.StringProperty(
+        name="工作目录",
+        default="",
+        subtype="DIR_PATH",
+        description="选择工作目录",
+    )  # type: ignore

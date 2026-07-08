@@ -4,7 +4,6 @@ import os
 from .utils.json_reader import HYC_JsonReader
 from .utils.material_creator import HYC_MaterialCreator
 from .utils.draw_handlers import HYC_DrawHelloWorld
-from .preferences import get_preferences
 
 
 # ============================================
@@ -40,7 +39,6 @@ class HYC_DragDrop_Json(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
-        addon_prefs = get_preferences()
         
         # 打印拖放的文件信息
         print("\n=== 拖放文件信息 ===")
@@ -54,8 +52,8 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         print("===================")
         
         # 设置默认工作目录
-        if not addon_prefs.workspaceDir:
-            addon_prefs.workspaceDir = os.path.dirname(bpy.data.filepath)
+        if not props.workspaceDir:
+            props.workspaceDir = os.path.dirname(bpy.data.filepath)
         
         json_data = {}
         
@@ -92,12 +90,12 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         else:
             if bpy.data.filepath:
                 # 优先从JSON文件夹读取
-                json_folder = os.path.join(addon_prefs.workspaceDir, 'JSON')
+                json_folder = os.path.join(props.workspaceDir, 'JSON')
                 if os.path.exists(json_folder):
                     json_data = HYC_JsonReader.load_materials_from_folder(json_folder)
                 else:
                     # 兼容旧格式：从Tex文件夹读取
-                    json_path = os.path.join(addon_prefs.workspaceDir, 'Tex', 
+                    json_path = os.path.join(props.workspaceDir, 'Tex', 
                                             os.path.basename(bpy.data.filepath).replace(".blend", ".json"))
                     if os.path.exists(json_path):
                         json_data = self.load_single_json(json_path)
@@ -438,14 +436,13 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
-        addon_prefs = get_preferences()
         # 获取选中的物体
         selected_objects = context.selected_objects
         if not selected_objects:
             self.report({"WARNING"}, "请先选择物体")
             return {"CANCELLED"}
         # 获取工作目录
-        workspace_dir = addon_prefs.workspaceDir
+        workspace_dir = props.workspaceDir
         if not workspace_dir:
             self.report({"WARNING"}, "请先设置工作目录")
             return {"CANCELLED"}
@@ -585,15 +582,14 @@ class HYC_OT_AutoImportJson(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
-        addon_prefs = get_preferences()
 
         # 检查工作目录是否设置
-        if not addon_prefs.workspaceDir:
+        if not props.workspaceDir:
             self.report({"WARNING"}, "请先设置工作目录，或拖拽json文件到场景中")
             return {"CANCELLED"}
 
         # 构建JSON文件夹路径
-        json_folder = os.path.join(addon_prefs.workspaceDir, "JSON")
+        json_folder = os.path.join(props.workspaceDir, "JSON")
         if not os.path.exists(json_folder):
             self.report({"WARNING"}, f"JSON文件夹不存在: {json_folder}")
             return {"CANCELLED"}
