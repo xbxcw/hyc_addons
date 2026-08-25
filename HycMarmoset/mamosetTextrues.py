@@ -10,8 +10,8 @@ Albedo = 'Albedo'
 Normals = 'Normal'
 Mask = 'Mask'
 SEMANTIC_KEYS = {
-    Albedo:   ["D", "Albedo","D/DA","WindowBase","BaseAlbedo (A:Height)","DA"],
-    Normals:  ["Normal",'Normal Map',"WindowNR","BaseNormal"],
+    Albedo:   ["D", "Albedo","D/DA","WindowBase","BaseAlbedo (A:Height)","DA","ColorOpacity"],
+    Normals:  ["Normal",'Normal Map',"WindowNR","BaseNormal","NormalMap"],
     Mask:     ["ORM", "Mix Map","BaseORM"],
 }
 
@@ -244,21 +244,45 @@ def connect_materials_from_json(json_path=None):
 
 def create_toolbar_window():
 
-    window = mset.UIWindow("File Selector")
+    window = mset.UIWindow("Folder Selector")
 
-    label = mset.UILabel("No file selected")
+    label = mset.UILabel("No folder selected")
     window.addElement(label)
     window.addReturn()
-    def choose_file():
 
-        path = mset.showOpenFileDialog()
+    def choose_file():
+        path = mset.showOpenFolderDialog()
         if path:
             label.text = path
 
-    button01 = mset.UIButton("Select File")
+    def process_folder():
+        folder_path = label.text
+        if not folder_path or folder_path == "No folder selected":
+            print("Please select a folder first.")
+            return
+
+        all_materials = mset.getAllMaterials()
+        if not all_materials:
+            print("No materials found in the scene.")
+            return
+
+        for mat in all_materials:
+            mat_name = getattr(mat, 'name', '')
+            if not mat_name:
+                continue
+            json_path = os.path.join(folder_path, mat_name + '.json')
+            if os.path.exists(json_path):
+                print(f"Found JSON for material: {mat_name}")
+                texture_paths = load_texture_map(json_path)
+                if texture_paths is not None:
+                    connect_material_from_json(mat_name, texture_paths)
+            else:
+                print(f"Skipped material (no matching JSON): {mat_name}")
+
+    button01 = mset.UIButton("Select Folder")
     button01.onClick = choose_file
     button02 = mset.UIButton('Enter')
-    button02.onClick = lambda:connect_materials_from_json(label.text)
+    button02.onClick = process_folder
 
     window.addElement(button01)
     window.addStretchSpace()
@@ -282,10 +306,9 @@ def find_specified_file(path, suffix=''):
 
 if __name__ == '__main__':
 
-    # create_toolbar_window()
-    json_path = r"E:\work\BP_FloatingCastle_Building_21\Tex"
-    json_file = find_specified_file(json_path,'.json')
-    for i in json_file:
-        connect_materials_from_json(i)
+    create_toolbar_window()
+    # json_path = r"E:\work\BP_FloatingCastle_Building_21\Tex"
+    # json_file = find_specified_file(json_path,'.json')
+    # for i in json_file:
+    #     connect_materials_from_json(i)
         # break
-    
