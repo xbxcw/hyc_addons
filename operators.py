@@ -162,20 +162,19 @@ class HYC_Create_LOD(bpy.types.Operator):
     def poll(cls, context: bpy.types.Context) -> bool:
         return context.area.type == "VIEW_3D"
 
-    def _move_to_first_collection(self, obj: bpy.types.Object) -> None:
-        """将物体移动到场景的第一个集合（如果存在集合）"""
-        if bpy.data.collections:
-            first_collection = bpy.data.collections[0]
-            for coll in obj.users_collection:
-                coll.objects.unlink(obj)
-            first_collection.objects.link(obj)
+    def _move_to_collection(self, obj: bpy.types.Object, target_collection: bpy.types.Collection) -> None:
+        """将物体移动到目标集合"""
+        for coll in obj.users_collection:
+            coll.objects.unlink(obj)
+        target_collection.objects.link(obj)
 
-    def _get_or_create_empty(self, name: str, fbx_type: str = "LodGroup") -> bpy.types.Object:
+    def _get_or_create_empty(self, name: str, fbx_type: str = "LodGroup", target_collection: bpy.types.Collection = None) -> bpy.types.Object:
         """获取或创建空物体并设置属性
 
         Args:
             name: 空物体名称
             fbx_type: fbx_type 属性值，默认为 "LodGroup"
+            target_collection: 目标集合，如果为 None 则不移动
 
         Returns:
             空物体对象
@@ -185,14 +184,16 @@ class HYC_Create_LOD(bpy.types.Operator):
         if existing_obj:
             if "fbx_type" not in existing_obj:
                 existing_obj["fbx_type"] = fbx_type
-            self._move_to_first_collection(existing_obj)
+            if target_collection:
+                self._move_to_collection(existing_obj, target_collection)
             return existing_obj
 
         bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
         empty_obj = bpy.context.active_object
         empty_obj["fbx_type"] = fbx_type
         empty_obj.name = name
-        self._move_to_first_collection(empty_obj)
+        if target_collection:
+            self._move_to_collection(empty_obj, target_collection)
         return empty_obj
 
     def _extract_base_name(self, obj_name: str) -> str:
@@ -271,16 +272,23 @@ class HYC_Create_LOD(bpy.types.Operator):
             self.report({"WARNING"}, "请先选择物体")
             return {"CANCELLED"}
 
+        # 获取选中物体所在的第一个集合作为目标集合
+        target_collection = None
+        for obj in selected_objects:
+            if obj.users_collection:
+                target_collection = obj.users_collection[0]
+                break
+
         # 使用集合推导式提取基础名称
         base_names = {self._extract_base_name(obj.name) for obj in selected_objects}
 
         total_count = 0
         for base_name in base_names:
             # 创建 name 空物体（最顶层父级）
-            main_empty = self._get_or_create_empty(base_name, fbx_type="Transform")
+            main_empty = self._get_or_create_empty(base_name, fbx_type="Transform", target_collection=target_collection)
 
             # 创建 name_LOD 空物体
-            lod_empty = self._get_or_create_empty(base_name + "_LOD", fbx_type="LodGroup")
+            lod_empty = self._get_or_create_empty(base_name + "_LOD", fbx_type="LodGroup", target_collection=target_collection)
 
             # 设置父子关系
             lod_empty.parent = main_empty
@@ -324,110 +332,151 @@ class HYC_FH_DragJson(bpy.types.FileHandler):
 
 
 class HYC_OT_ExportFBX(bpy.types.Operator):
-    """导出选中空物体及其子级为FBX文件"""
+    """导出当前集合为FBX文件"""
 
     bl_idname = "hyc.export_fbx_op"
     bl_label = "导出FBX"
     bl_options = {"REGISTER", "UNDO"}
 
-    def get_hierarchy_objects(self, parent_obj):
-        """递归获取父物体及其所有子级物体（包括空物体和网格）"""
+    def get_collection_objects(self, collection):
+        """递归获取集合及其子集合中的所有物体（空物体和网格）"""
+        objects = []
+        for obj in collection.objects:
+            if obj.type in {"MESH", "EMPTY"}:
+                objects.append(obj)
+        for child_collection in collection.children:
+            objects.extend(self.get_collection_objects(child_collection))
+        return objects
+
+    def export_collection_fbx(self, collection, fbx_dir):
+        """导出单个集合为FBX"""
+        collection_objects = self.get_collection_objects(collection)
+
+        if not collection_objects:
+            self.report({"WARNING"}, f"集合 {collection.name} 中没有可导出的物体")
+            return False
+
+        fbx_path = os.path.join(fbx_dir, f"{collection.name}.fbx")
+
+        bpy.ops.object.select_all(action="DESELECT")
+
+        for obj in collection_objects:
+            obj.select_set(True)
+
+        bpy.ops.export_scene.fbx(
+            filepath=fbx_path,
+            check_existing=True,
+            filter_glob="*.fbx",
+            use_selection=True,
+            use_visible=False,
+            use_active_collection=False,
+            collection="",
+            object_types={"MESH", "EMPTY"},
+            global_scale=1.0,
+            apply_unit_scale=True,
+            apply_scale_options="FBX_SCALE_NONE",
+            use_space_transform=True,
+            bake_space_transform=False,
+            axis_forward="-Z",
+            axis_up="Y",
+            use_mesh_modifiers=True,
+            use_mesh_modifiers_render=True,
+            mesh_smooth_type="EDGE",
+            colors_type="SRGB",
+            prioritize_active_color=False,
+            use_subsurf=False,
+            use_mesh_edges=False,
+            use_tspace=False,
+            use_triangles=False,
+            use_custom_props=True,
+            add_leaf_bones=False,
+            primary_bone_axis="Y",
+            secondary_bone_axis="X",
+            use_armature_deform_only=False,
+            armature_nodetype="NULL",
+            bake_anim=False,
+            bake_anim_use_all_bones=False,
+            bake_anim_use_nla_strips=False,
+            bake_anim_use_all_actions=False,
+            bake_anim_force_startend_keying=False,
+            bake_anim_step=1.0,
+            bake_anim_simplify_factor=1.0,
+            path_mode="AUTO",
+            embed_textures=False,
+            batch_mode="OFF",
+            use_batch_own_dir=True,
+            use_metadata=True,
+        )
+
+        self.report({"INFO"}, f"成功导出FBX: {fbx_path}")
+        return True
+
+    def export_single_fbx(self, parent_obj, fbx_dir):
+        """导出单个物体及其子级为FBX"""
         objects = []
 
         def collect_objects(obj):
-            # 收集空物体和网格物体
-            if obj.type == "MESH" or obj.type == "EMPTY":
+            if obj.type in {"MESH", "EMPTY"}:
                 objects.append(obj)
             for child in obj.children:
                 collect_objects(child)
 
         collect_objects(parent_obj)
-        return objects
 
-    def export_single_fbx(self, parent_obj, fbx_dir):
-        """导出单个空物体及其层级为FBX"""
-        # 获取层级中的所有物体
-        hierarchy_objects = self.get_hierarchy_objects(parent_obj)
-
-        if not hierarchy_objects:
-            self.report({"WARNING"}, f"空物体 {parent_obj.name} 下没有可导出的物体")
+        if not objects:
+            self.report({"WARNING"}, f"物体 {parent_obj.name} 下没有可导出的物体")
             return False
 
-        # 构建输出路径
         fbx_path = os.path.join(fbx_dir, f"{parent_obj.name}.fbx")
 
-        # 取消所有选择
         bpy.ops.object.select_all(action="DESELECT")
 
-        # 选择层级中的所有物体
-        for obj in hierarchy_objects:
+        for obj in objects:
             obj.select_set(True)
 
-        # 导出FBX - Blender 5.x 版本完整参数（带详细注释）
         bpy.ops.export_scene.fbx(
-            # ===== 基础设置 =====
-            filepath=fbx_path,  # 导出文件的完整路径
-            check_existing=True,  # 检查文件是否已存在（存在时弹窗询问）
-            filter_glob="*.fbx",  # 文件过滤格式
-            # ===== 选择设置 =====
-            use_selection=True,  # 仅导出选中的物体
-            use_visible=False,  # 导出可见物体
-            use_active_collection=False,  # 导出活动集合中的物体
-            collection="",  # 指定导出的集合名称
-            # ===== 对象类型 =====
-            object_types={"MESH", "EMPTY"},  # 导出的对象类型集合（网格+空物体）
-            # 可选值: 'EMPTY', 'CAMERA', 'LIGHT', 'ARMATURE', 'MESH', 'OTHER'
-            # ===== 缩放设置 =====
-            global_scale=1.0,  # 全局缩放因子
-            apply_unit_scale=True,  # 应用单位缩放（米/厘米等）
-            apply_scale_options="FBX_SCALE_NONE",  # 缩放选项
-            # 可选值: 'FBX_SCALE_NONE', 'FBX_SCALE_UNITS', 'FBX_SCALE_CUSTOM', 'FBX_SCALE_ALL'
-            # ===== 空间变换 =====
-            use_space_transform=True,  # 使用空间变换
-            bake_space_transform=False,  # 将空间变换烘焙到顶点
-            # ===== 轴设置 =====
-            axis_forward="-Z",  # 前向轴（Blender默认）
-            axis_up="Y",  # 向上轴
-            # 可选值: 'X', 'Y', 'Z', '-X', '-Y', '-Z'
-            # ===== 网格设置 =====
-            use_mesh_modifiers=True,  # 应用网格修改器
-            use_mesh_modifiers_render=True,  # 使用渲染时的修改器设置
-            mesh_smooth_type="EDGE",  # 平滑类型
-            # 可选值: 'OFF', 'FACE', 'EDGE', 'SMOOTH_GROUP'
-            colors_type="SRGB",  # 颜色类型
-            # 可选值: 'NONE', 'SRGB', 'LINEAR'
-            prioritize_active_color=False,  # 优先使用活动颜色层
-            use_subsurf=False,  # 导出细分表面
-            use_mesh_edges=False,  # 导出网格边
-            use_tspace=False,  # 导出切线空间数据
-            use_triangles=False,  # 转换为三角形
-            # ===== 自定义属性 =====
-            use_custom_props=True,  # 导出自定义属性到FBX
-            # ===== 骨骼设置 =====
-            add_leaf_bones=False,  # 添加叶骨骼（末端骨骼）
-            primary_bone_axis="Y",  # 主骨骼轴
-            secondary_bone_axis="X",  # 次骨骼轴
-            use_armature_deform_only=False,  # 仅导出蒙皮骨骼
-            armature_nodetype="NULL",  # 骨骼根节点类型
-            # 可选值: 'NULL', 'ROOT', 'LIMBNODE'
-            # ===== 动画烘焙 =====
-            bake_anim=False,  # 是否烘焙动画
-            bake_anim_use_all_bones=False,  # 使用所有骨骼烘焙动画
-            bake_anim_use_nla_strips=False,  # 使用NLA strips烘焙
-            bake_anim_use_all_actions=False,  # 烘焙所有动作
-            bake_anim_force_startend_keying=False,  # 强制首尾关键帧
-            bake_anim_step=1.0,  # 动画采样步长
-            bake_anim_simplify_factor=1.0,  # 动画简化因子（1.0=不简化）
-            # ===== 路径/纹理 =====
-            path_mode="AUTO",  # 纹理路径模式
-            # 可选值: 'AUTO', 'ABSOLUTE', 'RELATIVE', 'MATCH', 'STRIP', 'COPY'
-            embed_textures=False,  # 将纹理嵌入FBX文件
-            # ===== 批处理 =====
-            batch_mode="OFF",  # 批处理模式
-            # 可选值: 'OFF', 'SCENE', 'COLLECTION', 'SCENE_COLLECTION', 'ACTIVE_SCENE_COLLECTION'
-            use_batch_own_dir=True,  # 每个物体使用独立目录
-            # ===== 元数据 =====
-            use_metadata=True,  # 导出元数据
+            filepath=fbx_path,
+            check_existing=True,
+            filter_glob="*.fbx",
+            use_selection=True,
+            use_visible=False,
+            use_active_collection=False,
+            collection="",
+            object_types={"MESH", "EMPTY"},
+            global_scale=1.0,
+            apply_unit_scale=True,
+            apply_scale_options="FBX_SCALE_NONE",
+            use_space_transform=True,
+            bake_space_transform=False,
+            axis_forward="-Z",
+            axis_up="Y",
+            use_mesh_modifiers=True,
+            use_mesh_modifiers_render=True,
+            mesh_smooth_type="EDGE",
+            colors_type="SRGB",
+            prioritize_active_color=False,
+            use_subsurf=False,
+            use_mesh_edges=False,
+            use_tspace=False,
+            use_triangles=False,
+            use_custom_props=True,
+            add_leaf_bones=False,
+            primary_bone_axis="Y",
+            secondary_bone_axis="X",
+            use_armature_deform_only=False,
+            armature_nodetype="NULL",
+            bake_anim=False,
+            bake_anim_use_all_bones=False,
+            bake_anim_use_nla_strips=False,
+            bake_anim_use_all_actions=False,
+            bake_anim_force_startend_keying=False,
+            bake_anim_step=1.0,
+            bake_anim_simplify_factor=1.0,
+            path_mode="AUTO",
+            embed_textures=False,
+            batch_mode="OFF",
+            use_batch_own_dir=True,
+            use_metadata=True,
         )
 
         self.report({"INFO"}, f"成功导出FBX: {fbx_path}")
@@ -436,19 +485,17 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
-        # 获取选中的物体
-        selected_objects = context.selected_objects
-        if not selected_objects:
-            self.report({"WARNING"}, "请先选择物体")
-            return {"CANCELLED"}
-        # 获取工作目录
         workspace_dir = props.workspaceDir
         if not workspace_dir:
             self.report({"WARNING"}, "请先设置工作目录")
             return {"CANCELLED"}
 
         if props.export_mode == "bake":
-            # Bake 模式：导出到 项目文件夹/bake/当前blend文件名/选择模型的名字.fbx
+            selected_objects = context.selected_objects
+            if not selected_objects:
+                self.report({"WARNING"}, "请先选择物体")
+                return {"CANCELLED"}
+
             blend_name = os.path.splitext(os.path.basename(bpy.data.filepath))[0]
             if not blend_name:
                 self.report({"WARNING"}, "请先保存 blend 文件")
@@ -465,22 +512,28 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
             else:
                 self.report({"WARNING"}, "没有成功导出任何FBX文件")
         else:
-            # UE 模式：原有逻辑，导出到 Fbx 文件夹
-            empty_objects = [obj for obj in selected_objects if obj.type == "EMPTY"]
-            if not empty_objects:
-                self.report({"WARNING"}, "请至少选择一个空物体")
+            active_collection = context.collection
+            if not active_collection:
+                self.report({"WARNING"}, "没有活动集合")
                 return {"CANCELLED"}
+
             fbx_dir = os.path.join(workspace_dir, "Fbx")
             os.makedirs(fbx_dir, exist_ok=True)
 
-            export_count = 0
-            for parent_obj in empty_objects:
-                if self.export_single_fbx(parent_obj, fbx_dir):
-                    export_count += 1
-            if export_count > 0:
-                self.report({"INFO"}, f"共成功导出 {export_count} 个FBX文件")
+            if active_collection.children:
+                export_count = 0
+                for child_col in active_collection.children:
+                    if self.export_collection_fbx(child_col, fbx_dir):
+                        export_count += 1
+                if export_count > 0:
+                    self.report({"INFO"}, f"共导出 {export_count} 个子集合到 Fbx/")
+                else:
+                    self.report({"WARNING"}, "没有成功导出任何FBX文件")
             else:
-                self.report({"WARNING"}, "没有成功导出任何FBX文件")
+                if self.export_collection_fbx(active_collection, fbx_dir):
+                    self.report({"INFO"}, f"已导出集合 \"{active_collection.name}\" 到 Fbx/")
+                else:
+                    self.report({"WARNING"}, "没有成功导出任何FBX文件")
         return {"FINISHED"}
 
 
