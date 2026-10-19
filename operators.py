@@ -358,19 +358,14 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
 
         fbx_path = os.path.join(fbx_dir, f"{collection.name}.fbx")
 
-        bpy.ops.object.select_all(action="DESELECT")
-
-        for obj in collection_objects:
-            obj.select_set(True)
-
         bpy.ops.export_scene.fbx(
             filepath=fbx_path,
             check_existing=True,
             filter_glob="*.fbx",
-            use_selection=True,
+            use_selection=False,
             use_visible=False,
             use_active_collection=False,
-            collection="",
+            collection=collection.name,
             object_types={"MESH", "EMPTY"},
             global_scale=1.0,
             apply_unit_scale=True,
