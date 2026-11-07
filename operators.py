@@ -1,6 +1,7 @@
 import bpy
 import os
 
+from .utils import get_workspace_dir, has_project
 from .utils.json_reader import HYC_JsonReader
 from .utils.material_creator import HYC_MaterialCreator
 from .utils.draw_handlers import HYC_DrawHelloWorld
@@ -51,8 +52,8 @@ class HYC_DragDrop_Json(bpy.types.Operator):
                 print(f"  文件 {i+1}: {filename}")
         print("===================")
         
-        # 设置默认工作目录
-        if not props.workspaceDir:
+        # 设置默认工作目录（有 Blender 项目时由项目根目录提供）
+        if not props.workspaceDir and not has_project():
             props.workspaceDir = os.path.dirname(bpy.data.filepath)
         
         json_data = {}
@@ -88,14 +89,15 @@ class HYC_DragDrop_Json(bpy.types.Operator):
         
         # 情况3: 没有提供路径，尝试自动查找
         else:
-            if bpy.data.filepath:
+            workspace_dir = get_workspace_dir(context)
+            if workspace_dir:
                 # 优先从JSON文件夹读取
-                json_folder = os.path.join(props.workspaceDir, 'JSON')
+                json_folder = os.path.join(workspace_dir, 'JSON')
                 if os.path.exists(json_folder):
                     json_data = HYC_JsonReader.load_materials_from_folder(json_folder)
                 else:
                     # 兼容旧格式：从Tex文件夹读取
-                    json_path = os.path.join(props.workspaceDir, 'Tex', 
+                    json_path = os.path.join(workspace_dir, 'Tex', 
                                             os.path.basename(bpy.data.filepath).replace(".blend", ".json"))
                     if os.path.exists(json_path):
                         json_data = self.load_single_json(json_path)
@@ -480,9 +482,9 @@ class HYC_OT_ExportFBX(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.hyc_props
-        workspace_dir = props.workspaceDir
+        workspace_dir = get_workspace_dir(context)
         if not workspace_dir:
-            self.report({"WARNING"}, "请先设置工作目录")
+            self.report({"WARNING"}, "请先设置工作目录或创建项目")
             return {"CANCELLED"}
 
         if props.export_mode == "bake":
@@ -632,12 +634,13 @@ class HYC_OT_AutoImportJson(bpy.types.Operator):
         props = scene.hyc_props
 
         # 检查工作目录是否设置
-        if not props.workspaceDir:
-            self.report({"WARNING"}, "请先设置工作目录，或拖拽json文件到场景中")
+        workspace_dir = get_workspace_dir(context)
+        if not workspace_dir:
+            self.report({"WARNING"}, "请先设置工作目录或创建项目，或拖拽json文件到场景中")
             return {"CANCELLED"}
 
         # 构建JSON文件夹路径
-        json_folder = os.path.join(props.workspaceDir, "JSON")
+        json_folder = os.path.join(workspace_dir, "JSON")
         if not os.path.exists(json_folder):
             self.report({"WARNING"}, f"JSON文件夹不存在: {json_folder}")
             return {"CANCELLED"}

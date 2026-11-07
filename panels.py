@@ -1,5 +1,6 @@
 import bpy
 from . import operators
+from .utils import get_workspace_dir, has_project
 class HYC_PT_panel(bpy.types.Panel):
     bl_idname = 'HYC_PT_panel'
     bl_label = "简单面板"
@@ -23,7 +24,10 @@ class HYC_PT_panel(bpy.types.Panel):
         row.operator(operators.HYC_OT_AutoImportJson.bl_idname, text="", icon='IMPORT')
         
         row = layout.row()
-        row.prop(hyc_props, "workspaceDir", text="Workspace")
+        if has_project():
+            row.label(text=get_workspace_dir(context), icon='FILEBROWSER')
+        else:
+            row.prop(hyc_props, "workspaceDir", text="Workspace")
         # layout.separator()
         row.operator(operators.HYC_Create_LOD.bl_idname)
         row.prop(hyc_props, "export_mode")
