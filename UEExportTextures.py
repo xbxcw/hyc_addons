@@ -119,6 +119,17 @@ def export_texture_to_tga(texture, output_dir):
     return None
 
 
+def run_asset_export(task):
+    """执行导出任务，兼容不同版本的 UE Python API"""
+    try:
+        if hasattr(unreal.Exporter, "run_asset_export_task"):
+            return unreal.Exporter.run_asset_export_task(task)
+        return unreal.Exporter.run_asset_export_tasks([task])
+    except Exception as e:
+        print(f"⚠️ 导出任务执行异常: {e}")
+        return False
+
+
 def export_static_mesh_to_fbx(mesh, output_dir):
     """导出静态网格体为FBX"""
     os.makedirs(output_dir, exist_ok=True)
@@ -132,20 +143,42 @@ def export_static_mesh_to_fbx(mesh, output_dir):
     task.prompt = False
     task.replace_identical = True
 
+    success = run_asset_export(task)
+    if success and os.path.exists(filename) and os.path.getsize(filename) > 0:
+        print(f"✅ 模型 {mesh_name} 已导出至 {filename}")
+        return filename
+    print(f"❌ 模型 {mesh_name} 导出失败")
+    return None
+
+
+def export_skeletal_mesh_to_fbx(mesh, output_dir):
+    """导出骨骼网格体为FBX（包含骨骼层级、绑定姿态与蒙皮权重）"""
+    os.makedirs(output_dir, exist_ok=True)
+    mesh_name = mesh.get_name()
+    filename = os.path.join(output_dir, f"{mesh_name}.fbx")
+
+    task = unreal.AssetExportTask()
+    task.object = mesh
+    task.filename = filename
+    task.automated = True
+    task.prompt = False
+    task.replace_identical = True
+
+    # 骨骼网格体导出依赖 FBX 导出选项，不同版本属性不同，做兼容保护
     try:
-        if hasattr(unreal.Exporter, "run_asset_export_task"):
-            success = unreal.Exporter.run_asset_export_task(task)
-        else:
-            success = unreal.Exporter.run_asset_export_tasks([task])
-        if success:
-            print(f"✅ 模型 {mesh_name} 已导出至 {filename}")
-            return filename
-        else:
-            print(f"❌ 模型 {mesh_name} 导出失败")
-            return None
+        if hasattr(unreal, "FbxExportOption"):
+            options = unreal.FbxExportOption()
+            options.set_editor_property("ascii", False)
+            task.options = options
     except Exception as e:
-        print(f"导出模型 {mesh_name} 时出错: {e}")
-        return None
+        print(f"⚠️ 设置FBX导出选项失败（将使用默认选项）: {e}")
+
+    success = run_asset_export(task)
+    if success and os.path.exists(filename) and os.path.getsize(filename) > 0:
+        print(f"✅ 骨骼模型 {mesh_name} 已导出至 {filename}")
+        return filename
+    print(f"❌ 骨骼模型 {mesh_name} 导出失败")
+    return None
 
 
 def get_static_mesh_materials(mesh):
@@ -172,19 +205,40 @@ def get_static_mesh_materials(mesh):
     return materials
 
 
-def process_static_mesh(mesh):
-    """处理单个静态网格体，导出模型和贴图"""
-    mesh_name = mesh.get_name()
-    print(f"\n========================================")
-    print(f"开始处理模型：{mesh_name}")
+def get_skeletal_mesh_materials(mesh):
+    """获取骨骼网格体的所有材质槽+材质"""
+    materials = []
+    try:
+        skeletal_materials = mesh.get_editor_property("materials")
+    except Exception:
+        skeletal_materials = getattr(mesh, "materials", None)
 
-    # 导出模型本身
-    fbx_path = export_static_mesh_to_fbx(mesh, fbxDir)
+    if skeletal_materials:
+        for idx, sm in enumerate(skeletal_materials):
+            try:
+                mat = sm.get_editor_property("material_interface")
+            except Exception:
+                mat = getattr(sm, "material_interface", None)
+            if mat:
+                materials.append((idx, mat))
+        return materials
 
-    # 每个模型独立的JSON数据结构：材质名 → 参数名:路径
-    current_model_data = {}
-    materials = get_static_mesh_materials(mesh)
+    # 兜底：部分版本可通过 get_material 获取
+    idx = 0
+    while True:
+        try:
+            mat = mesh.get_material(idx)
+        except Exception:
+            break
+        if not mat:
+            break
+        materials.append((idx, mat))
+        idx += 1
+    return materials
 
+
+def collect_material_textures(materials, mesh_name):
+    """遍历材质槽，导出贴图并按材质名汇总到全局JSON数据"""
     for idx, material in materials:
         mat_name = material.get_name()
 
@@ -234,6 +288,35 @@ def process_static_mesh(mesh):
             except Exception as e:
                 continue
 
+
+def process_static_mesh(mesh):
+    """处理单个静态网格体，导出模型和贴图"""
+    mesh_name = mesh.get_name()
+    print(f"\n========================================")
+    print(f"开始处理静态网格体：{mesh_name}")
+
+    # 导出模型本身
+    fbx_path = export_static_mesh_to_fbx(mesh, fbxDir)
+
+    # 收集并导出材质贴图
+    collect_material_textures(get_static_mesh_materials(mesh), mesh_name)
+
+    print(f"└─ 模型 {mesh_name} 处理完成")
+    return fbx_path
+
+
+def process_skeletal_mesh(mesh):
+    """处理单个骨骼网格体，导出模型和贴图"""
+    mesh_name = mesh.get_name()
+    print(f"\n========================================")
+    print(f"开始处理骨骼网格体：{mesh_name}")
+
+    # 导出模型本身（含骨骼与蒙皮）
+    fbx_path = export_skeletal_mesh_to_fbx(mesh, fbxDir)
+
+    # 收集并导出材质贴图
+    collect_material_textures(get_skeletal_mesh_materials(mesh), mesh_name)
+
     print(f"└─ 模型 {mesh_name} 处理完成")
     return fbx_path
 
@@ -279,21 +362,31 @@ def open_folder_and_select_file(file_path):
 
 
 def main():
-    """主函数：处理所有选中的静态网格体"""
-    # 获取内容浏览器选中的静态网格体
+    """主函数：处理所有选中的静态网格体和骨骼网格体"""
+    # 获取内容浏览器选中的资产
     selected_assets = unreal.EditorUtilityLibrary.get_selected_assets()
     static_meshes = unreal.EditorFilterLibrary.by_class(selected_assets, unreal.StaticMesh)
-    
-    if not static_meshes:
-        print("请在内容浏览器中选择静态网格体！")
+    try:
+        skeletal_meshes = unreal.EditorFilterLibrary.by_class(selected_assets, unreal.SkeletalMesh)
+    except Exception:
+        skeletal_meshes = []
+
+    if not static_meshes and not skeletal_meshes:
+        print("请在内容浏览器中选择静态网格体或骨骼网格体！")
         return
     
     # 存储导出的FBX文件路径，用于后续打开文件夹
     exported_fbx_files = []
     
-    # 遍历每个模型，收集材质数据
+    # 遍历每个静态网格体，收集材质数据
     for mesh in static_meshes:
         fbx_path = process_static_mesh(mesh)
+        if fbx_path:
+            exported_fbx_files.append(fbx_path)
+
+    # 遍历每个骨骼网格体，收集材质数据
+    for mesh in skeletal_meshes:
+        fbx_path = process_skeletal_mesh(mesh)
         if fbx_path:
             exported_fbx_files.append(fbx_path)
 
